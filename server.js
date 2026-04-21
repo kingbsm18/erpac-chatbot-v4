@@ -27,12 +27,22 @@ let sheets = null;
 async function initGoogleSheets() {
   if (!SPREADSHEET_ID || !GOOGLE_CLIENT_EMAIL || !GOOGLE_PRIVATE_KEY) {
     console.log('⚠️ Google Sheets non configuré - variables manquantes');
-    console.log('   Ajouter: SPREADSHEET_ID, GOOGLE_CLIENT_EMAIL, GOOGLE_PRIVATE_KEY');
     return false;
   }
   
   try {
-    const privateKey = GOOGLE_PRIVATE_KEY.replace(/\\n/g, '\n');
+    // La clé peut arriver avec des \n littéraux (backslash+n) ou avec de vrais retours ligne
+    let privateKey = GOOGLE_PRIVATE_KEY;
+    // Si la chaîne contient le pattern "\n" (deux caractères), on les remplace par de vrais retours ligne
+    if (privateKey.includes('\\n')) {
+      privateKey = privateKey.replace(/\\n/g, '\n');
+    }
+    
+    // Vérification sommaire du format
+    if (!privateKey.includes('-----BEGIN PRIVATE KEY-----')) {
+      console.error('❌ La clé privée ne semble pas au bon format');
+      return false;
+    }
     
     const auth = new google.auth.JWT(
       GOOGLE_CLIENT_EMAIL,
@@ -43,6 +53,7 @@ async function initGoogleSheets() {
     
     sheets = google.sheets({ version: 'v4', auth });
     
+    // Test avec un appel simple
     await sheets.spreadsheets.get({ spreadsheetId: SPREADSHEET_ID });
     console.log('✅ Google Sheets connecté avec succès');
     return true;
@@ -51,7 +62,6 @@ async function initGoogleSheets() {
     return false;
   }
 }
-
 async function addLeadToSheet(clientData, estimateData, ttcValue) {
   if (!sheets) {
     console.log('⚠️ Google Sheets non disponible - sauvegarde locale uniquement');
