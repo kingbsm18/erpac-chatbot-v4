@@ -1,5 +1,7 @@
 const express = require("express");
+const { google } = require("googleapis");
 const app = express();
+
 app.use(express.json());
 app.use((req, res, next) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
@@ -9,15 +11,162 @@ app.use((req, res, next) => {
   next();
 });
 
-const WA_TOKEN        = process.env.WA_TOKEN;
-const WA_PHONE_ID     = process.env.WA_PHONE_ID;
+const WA_TOKEN = process.env.WA_TOKEN;
+const WA_PHONE_ID = process.env.WA_PHONE_ID;
 const WA_VERIFY_TOKEN = process.env.WA_VERIFY_TOKEN || "erpac_verify";
+
+// ── GOOGLE SHEETS CONFIGURATION (Compte de service) ─────────────────────────
+const SPREADSHEET_ID = process.env.SPREADSHEET_ID || "1VotreSheetIdIci";
+
+// Les identifiants du compte de service (directement depuis le JSON)
+const GOOGLE_CREDENTIALS = {
+  type: "service_account",
+  project_id: "fabled-variety-494013-j9",
+  private_key_id: "bab617f56cd75886796d1b2d046c3812b5716dab",
+  private_key: `-----BEGIN PRIVATE KEY-----
+MIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQCbYnb6EVOeLHFn
+JKejRjcGXuKZrS4SjCbxsDi0gRh3F76z0pa++HZgFEUfU+BwHZT8KiLhbBjUGVJR
+X6SEpNBodoNYPG1Y4DAyrv5yOBcoRMrSe2u6G283ogqumJ9LwZAW1ATDemjIQAsG
+vfNabhLZtqB369LCMfLYRB1sfE+UXesZx4hhIwSSxkJIpp6nqaKbushGmdYiFG3j
+HswfVDm8wIdXDlewPYM6flqZaXl8ZLhfF7FbX5wnYAfW/ZNaI+z9tz4zHVbX4frb
+9/4xfy7VdGmssth0iI0yf3FwrloN3auujh+dCzA8iba4kkoJXuZ+YgwKqp0yZhJ5
+RvtI1je7AgMBAAECggEAOI4qqtMSocAgWH/Nak6cqXtws6mGWubbJ93RjdVs/6/L
+T+0mxARwJYFLNV9Ukcoal3uIrY6oLM64mPicS1Enr9Xu8Xcw/4e90zzBTPZga146
+iki0yYzBuriGdc0EMdEWblCmGTYdHEG/IamSgQgOYWKo3m0djWQbtR55rSpD1saV
+HpNXo3wRPQycOIjJYCaQs7/ukzLckt0Vtt0CkHXc2eyo+/HxTlpliqg58uMqQKl9
+krYdIFz/6pPwduitbiCdAAwDGFpdFMpksKxCfDdd//ZHmeJC0riiBsrm72V6sFCw
+eNbq9lM+qf3kgxdzF7A+MXEIo95No8clxbpQvw+loQKBgQDKqRz8TPGpO7LayVw1
+Gl60W5/AKIZR6fASl+jZ4F6Eaz7ddMlCJ8abpvcXD+zCw4N0ixJve289t9F58fT3
+Jgr4+igD50HGT/QhyA94wQbjuQ15qwfnxogxM9ABUrivZziDZ0p22XXKDCSxiZCb
+yKdeLf+O5EzWG8cTSWu14uEjmwKBgQDER/x9jKNIJlZVJiYtE6ejBRPB1h9+/CW+
+33OvFDQeL02MlBpTDVZfAj0XtKPY3lPHtrmdAd4LyrOQUP9w9dWTQDkVmV2r5XiV
+QUuSeqwjYztBwzJ8PxnVuxLHJXvbAGpu4pOA3rDbiZmQoIFPpa0g/6vDDhG8GQWi
+KsjdnTPOYQKBgQC/Y55gFzpSHHL4dBmEfPbbVXw0uRDA4zE6HgRlXqNkYvPnqJc4
+xt+lt7S6Luvls0a+FWi/p86Sdrp5c6tojKDoKTcJGKjhZDimfo09+O1MukKjmIXK
+nuY99B/V0im6oF88jKbUFMLEwsu8kS0oqFQEazE4A4FJAEdObv0bdavo76QKBgGpY
+ZmDPthf9TYFM7ho2L/mPYqj/DomKrBjCkLcnRyWjk2y7QZgF/en0GI2jfbKeot3u
+DpsWy+uvo6JpgDz/tPvXLBabxbjA15hmjD+M33884Ho8/Dl9Js46UW48zOJXU1NI
+x4pnHYOVBfLqQ6WXqjnazIEeOlWjaP34GGSaK9uBAoGBAJrEbseAD802xn4KyRe7
+pglY16p3zc9bgwwlgTtx7lPrGtjO12S+RlJxNkFNOASYtXPV3CExc3O1aWp3ncaL
+6szjZGUHg36ncopsip2Fdm+exqGEigYYZFwQUxDk0FwuiEora0VnqAFgixEjnVM/
+wJ7Gz3ijWz4jBMdiEFbU7oTN
+-----END PRIVATE KEY-----\n`,
+  client_email: "erpac-bot-leads@fabled-variety-494013-j9.iam.gserviceaccount.com",
+  client_id: "107325132522818695291",
+  auth_uri: "https://accounts.google.com/o/oauth2/auth",
+  token_uri: "https://oauth2.googleapis.com/token",
+  auth_provider_x509_cert_url: "https://www.googleapis.com/oauth2/v1/certs",
+  client_x509_cert_url: "https://www.googleapis.com/robot/v1/metadata/x509/erpac-bot-leads%40fabled-variety-494013-j9.iam.gserviceaccount.com"
+};
+
+let sheets = null;
+
+async function initGoogleSheets() {
+  try {
+    const auth = new google.auth.JWT(
+      GOOGLE_CREDENTIALS.client_email,
+      null,
+      GOOGLE_CREDENTIALS.private_key,
+      ['https://www.googleapis.com/auth/spreadsheets']
+    );
+    
+    sheets = google.sheets({ version: 'v4', auth });
+    
+    // Test de connexion
+    await sheets.spreadsheets.get({ spreadsheetId: SPREADSHEET_ID });
+    console.log('✅ Google Sheets connecté avec succès');
+    return true;
+  } catch (error) {
+    console.error('❌ Erreur connexion Sheets:', error.message);
+    return false;
+  }
+}
+
+async function addLeadToSheet(clientData, estimateData, ttcValue) {
+  if (!sheets) {
+    console.log('⚠️ Google Sheets non initialisé');
+    return false;
+  }
+  
+  const now = new Date().toLocaleString('fr-MA', { timeZone: 'Africa/Casablanca' });
+  
+  // Calcul des options
+  const optionsList = [];
+  if (estimateData.pool) optionsList.push('Piscine');
+  if (estimateData.ac === 'gainable') optionsList.push('Clim gainable');
+  if (estimateData.home_automation) optionsList.push('Domotique');
+  const optionsStr = optionsList.length ? optionsList.join(', ') : 'Aucune';
+  
+  const values = [[
+    now,
+    clientData.nom,
+    clientData.telephone,
+    clientData.email,
+    estimateData.project_type || '',
+    estimateData.city || '',
+    estimateData.surface || '',
+    estimateData.floors || 1,
+    estimateData.standing || 'Moyen',
+    estimateData.basement ? 'Oui' : 'Non',
+    estimateData.soil === 'rocheux' ? 'Rocheux (+25k DH)' : 'Normal',
+    estimateData.pool ? 'Oui (+130k DH)' : 'Non',
+    estimateData.ac === 'gainable' ? 'Oui (+500 DH/m²)' : 'Non',
+    estimateData.home_automation ? 'Oui (+800 DH/m²)' : 'Non',
+    optionsStr,
+    ttcValue,
+    `https://wa.me/${clientData.telephone.replace(/[^0-9]/g, '')}`,
+    'Nouveau - À contacter'
+  ]];
+  
+  try {
+    // Vérifier si l'en-tête existe, sinon le créer
+    try {
+      await sheets.spreadsheets.values.get({
+        spreadsheetId: SPREADSHEET_ID,
+        range: 'Leads!A1:R1',
+      });
+    } catch {
+      const headers = [[
+        'Date/Heure', 'Nom Client', 'Téléphone', 'Email',
+        'Type Projet', 'Ville', 'Surface (m²)', 'Niveaux',
+        'Standing', 'Sous-sol', 'Terrain', 'Piscine',
+        'Clim Gainable', 'Domotique', 'Options sélectionnées',
+        'Montant TTC', 'Lien WhatsApp', 'Statut'
+      ]];
+      await sheets.spreadsheets.values.update({
+        spreadsheetId: SPREADSHEET_ID,
+        range: 'Leads!A1:R1',
+        valueInputOption: 'USER_ENTERED',
+        resource: { values: headers },
+      });
+      console.log('✅ En-tête créé');
+    }
+    
+    // Ajouter la ligne
+    await sheets.spreadsheets.values.append({
+      spreadsheetId: SPREADSHEET_ID,
+      range: 'Leads!A:R',
+      valueInputOption: 'USER_ENTERED',
+      insertDataOption: 'INSERT_ROWS',
+      resource: { values },
+    });
+    
+    console.log(`✅ Lead ajouté à Google Sheets: ${clientData.nom} - ${ttcValue}`);
+    return true;
+  } catch (error) {
+    console.error('❌ Erreur ajout lead:', error.message);
+    return false;
+  }
+}
+
+// Initialisation au démarrage
+initGoogleSheets();
 
 // ── KB ENRICHIE (Version Commerciale) ───────────────────────────────────────
 const KB = {
   name: "ERPAC (Entreprise de Réalisation de Projets d'Aménagement et de Construction)",
   phones: ["+212 669 078 556", "+212 537 222 222"],
-  email:  "info@erpac.ma",
+  email: "info@erpac.ma",
   location: "Rue Dakar, Imm N°5 Appt 1, Océan – Rabat",
   presentation: "ERPAC est une entreprise de BTP qualifiée par le ministère de l'Habitat. Nous sommes experts en Gros Œuvre, Aménagement et Étanchéité depuis plus de 10 ans.",
   services: "• Construction de Villas & Immeubles\n• Étanchéité (Toitures, Terrasses, Sous-sols)\n• Aménagement intérieur & Décoration de luxe\n• Charpente Métallique & Hangars Industriels\n• Construction de Piscines & Espaces verts",
@@ -43,28 +192,28 @@ const FAQ = [
   { pattern: /\b(garantie|decennale|assurance|fiabilité)\b/i, reply: "Tous nos chantiers sont couverts par une assurance décennale. Nous offrons une garantie de parfait achèvement d'un an et une garantie biennale sur les équipements." }
 ];
 
-// ── NLU (Amélioré avec pluriels) ────────────────────────────────────────────
+// ── NLU ──────────────────────────────────────────────────────────────────────
 const CITY_MAP = [
-  { pattern: /\b(casa|casablanca|kaza|ddar|bouskoura|ain diab|anfa)\b/i,   city: "Casablanca", zone: "A" },
-  { pattern: /\b(rabat|rbat|agdal|souissi|iberia|harhoura)\b/i,           city: "Rabat",       zone: "A" },
-  { pattern: /\b(mohammedia)\b/i,                                           city: "Mohammedia",  zone: "A" },
-  { pattern: /\b(marrakech|mre|kech|gueliz|hivernage)\b/i,                 city: "Marrakech",   zone: "B" },
-  { pattern: /\b(tanger|tanjah|tanja|malabata)\b/i,                        city: "Tanger",      zone: "B" },
-  { pattern: /\b(kenitra)\b/i,                                              city: "Kénitra",     zone: "B" },
-  { pattern: /\b(agadir|gadir|agdz)\b/i,                                   city: "Agadir",      zone: "C" },
-  { pattern: /\b(fes|fez|f[eè]s)\b/i,                                      city: "Fès",         zone: "C" },
-  { pattern: /\b(meknes|mekn[eè]s)\b/i,                                    city: "Meknès",      zone: "C" },
-  { pattern: /\b(oujda)\b/i,                                                city: "Oujda",       zone: "C" },
+  { pattern: /\b(casa|casablanca|kaza|ddar|bouskoura|ain diab|anfa)\b/i, city: "Casablanca", zone: "A" },
+  { pattern: /\b(rabat|rbat|agdal|souissi|iberia|harhoura)\b/i, city: "Rabat", zone: "A" },
+  { pattern: /\b(mohammedia)\b/i, city: "Mohammedia", zone: "A" },
+  { pattern: /\b(marrakech|mre|kech|gueliz|hivernage)\b/i, city: "Marrakech", zone: "B" },
+  { pattern: /\b(tanger|tanjah|tanja|malabata)\b/i, city: "Tanger", zone: "B" },
+  { pattern: /\b(kenitra)\b/i, city: "Kénitra", zone: "B" },
+  { pattern: /\b(agadir|gadir|agdz)\b/i, city: "Agadir", zone: "C" },
+  { pattern: /\b(fes|fez|f[eè]s)\b/i, city: "Fès", zone: "C" },
+  { pattern: /\b(meknes|mekn[eè]s)\b/i, city: "Meknès", zone: "C" },
+  { pattern: /\b(oujda)\b/i, city: "Oujda", zone: "C" },
 ];
 
 const INTENT_MAP = [
-  { intent: "devis",    pattern: /\b(devis?|prix|estimation|combien|tarif|cout|coût|facture|budget)\b/i },
+  { intent: "devis", pattern: /\b(devis?|prix|estimation|combien|tarif|cout|coût|facture|budget)\b/i },
   { intent: "services", pattern: /\b(services?|prestations?|offres?|travaux|construction|amenagement|étanchéité|piscines?|charpente|hangars?)\b/i },
-  { intent: "projets",  pattern: /\b(projets?|réalisations?|references?|villas?|restaurants?|cliniques?|hangars?|chantiers?)\b/i },
-  { intent: "contact",  pattern: /\b(contacts?|téléphones?|telephones?|emails?|adresses?|joindre|appeler|whatsapp)\b/i },
-  { intent: "info",     pattern: /\b(qui|erpac|société|entreprise|experience|présent|histoire|presentation)\b/i },
-  { intent: "human",    pattern: /\b(humains?|conseillers?|agents?|parler|personnes?|appel|rdv|rencontrer)\b/i },
-  { intent: "luxury",   pattern: /\b(luxe|premium|haut standing|marbre|zellige|domotique|standing)\b/i },
+  { intent: "projets", pattern: /\b(projets?|réalisations?|references?|villas?|restaurants?|cliniques?|hangars?|chantiers?)\b/i },
+  { intent: "contact", pattern: /\b(contacts?|téléphones?|telephones?|emails?|adresses?|joindre|appeler|whatsapp)\b/i },
+  { intent: "info", pattern: /\b(qui|erpac|société|entreprise|experience|présent|histoire|presentation)\b/i },
+  { intent: "human", pattern: /\b(humains?|conseillers?|agents?|parler|personnes?|appel|rdv|rencontrer)\b/i },
+  { intent: "luxury", pattern: /\b(luxe|premium|haut standing|marbre|zellige|domotique|standing)\b/i },
 ];
 
 function norm(s) {
@@ -86,12 +235,12 @@ function detectIntent(text) {
 }
 
 function extractEntities(text) {
-  const t   = norm(text);
+  const t = norm(text);
   const out = {};
 
   const surfM = text.match(/(?<!\d)\b(\d{2,4})\s*m[²2]/i);
   if (surfM) out.surface = parseFloat(surfM[1]);
-  
+
   const justNumber = text.match(/^\s*(\d{2,4})\s*$/);
   if (justNumber && !surfM) out.surface = parseFloat(justNumber[1]);
 
@@ -100,15 +249,15 @@ function extractEntities(text) {
   if (/\brdc\b/i.test(text)) out.floors = 1;
   if (/\brénovation\b/i.test(text) && floorsM) delete out.floors;
 
-  if (/sous[\s-]?sol/i.test(text))      out.basement = true;
+  if (/sous[\s-]?sol/i.test(text)) out.basement = true;
   if (/pas de sous[\s-]?sol/i.test(text)) out.basement = false;
   if (/\bsans sous[\s-]?sol\b/i.test(text)) out.basement = false;
 
   if (/\bpiscine\b/i.test(text) && !/villa|immeuble/i.test(text)) out.pool = true;
-  if (/sans piscine/i.test(text))        out.pool = false;
+  if (/sans piscine/i.test(text)) out.pool = false;
 
-  if (/\bgainable\b/i.test(text))        out.ac = "gainable";
-  else if (/\bsplit\b/i.test(text))      out.ac = "split";
+  if (/\bgainable\b/i.test(text)) out.ac = "gainable";
+  else if (/\bsplit\b/i.test(text)) out.ac = "split";
   else if (/\bclim\b/i.test(text) && !/\bclimat\b/i.test(text)) out.ac = "split";
 
   if (/domotique|smart home/i.test(text)) out.home_automation = true;
@@ -118,7 +267,7 @@ function extractEntities(text) {
 
   const ptM = t.match(/\b(villa|immeuble|appartement|rénovation|renovation|industriel|hangar)\b/);
   if (ptM) {
-    const map = { villa:"villa", immeuble:"immeuble", appartement:"immeuble", "rénovation":"renovation", renovation:"renovation", industriel:"industriel", hangar:"industriel" };
+    const map = { villa: "villa", immeuble: "immeuble", appartement: "immeuble", "rénovation": "renovation", renovation: "renovation", industriel: "industriel", hangar: "industriel" };
     out.project_type = map[ptM[1]] || ptM[1];
   }
 
@@ -138,45 +287,45 @@ function extractEntities(text) {
 // ── CALCULATION ENGINE ───────────────────────────────────────────────────────
 const ZONES = { A: 1.15, B: 1.10, C: 1.05, D: 1.00 };
 const RATES = {
-  economique: { gros: 3000,  fin: 900  },
-  moyen:      { gros: 5500,  fin: 1600 },
-  haut:       { gros: 10000, fin: 3000 },
+  economique: { gros: 3000, fin: 900 },
+  moyen: { gros: 5500, fin: 1600 },
+  haut: { gros: 10000, fin: 3000 },
 };
-const PROJ_COEFF = { villa:1.00, immeuble:1.05, renovation:0.60, industriel:0.80 };
+const PROJ_COEFF = { villa: 1.00, immeuble: 1.05, renovation: 0.60, industriel: 0.80 };
 const TVA = 0.20, IMPREVU = 0.07, HONO = 0.08;
-const ADD = { basement:2000, soil:25000, pool:130000, ac_gainable:500, home_auto:800 };
+const ADD = { basement: 2000, soil: 25000, pool: 130000, ac_gainable: 500, home_auto: 800 };
 
 function fmt(n) { return Math.round(n).toLocaleString("fr-MA") + " DH"; }
 
 function calculate_estimate(d) {
-  const zf  = ZONES[d.zone] || 1.00;
-  const r   = RATES[d.standing] || RATES.moyen;
-  const pc  = PROJ_COEFF[d.project_type] || 1.00;
-  const s   = d.surface, f = d.floors || 1;
+  const zf = ZONES[d.zone] || 1.00;
+  const r = RATES[d.standing] || RATES.moyen;
+  const pc = PROJ_COEFF[d.project_type] || 1.00;
+  const s = d.surface, f = d.floors || 1;
 
   let gros = r.gros * zf * pc * s * f;
-  if (d.basement)         gros += ADD.basement * s;
+  if (d.basement) gros += ADD.basement * s;
   if (d.soil === "rocheux") gros += ADD.soil;
 
   let fin = r.fin * zf * s * f;
   let opts = 0;
-  if (d.pool)                     opts += ADD.pool;
-  if (d.ac === "gainable")        opts += ADD.ac_gainable * s;
-  if (d.home_automation)          opts += ADD.home_auto * s;
+  if (d.pool) opts += ADD.pool;
+  if (d.ac === "gainable") opts += ADD.ac_gainable * s;
+  if (d.home_automation) opts += ADD.home_auto * s;
 
-  const base  = gros + fin;
-  const hono  = base * HONO;
-  const ht    = base + opts + hono;
-  const imp   = ht * IMPREVU;
-  const tva   = (ht + imp) * TVA;
-  const ttc   = ht + imp + tva;
+  const base = gros + fin;
+  const hono = base * HONO;
+  const ht = base + opts + hono;
+  const imp = ht * IMPREVU;
+  const tva = (ht + imp) * TVA;
+  const ttc = ht + imp + tva;
 
   return { gros, fin, opts, hono, ht, imp, tva, ttc };
 }
 
 function renderEstimate(d) {
   const e = calculate_estimate(d);
-  const standing_labels = { economique:"Économique", moyen:"Moyen", haut:"Haut Standing" };
+  const standing_labels = { economique: "Économique", moyen: "Moyen", haut: "Haut Standing" };
   return [
     `━━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
     `📊 AVANT-MÉTRÉ ERPAC 2026`,
@@ -256,10 +405,10 @@ const STEPS = [
     resolve(text, ents) {
       if (ents.basement !== undefined) return ents.basement;
       if (ents._yes) return true;
-      if (ents._no)  return false;
+      if (ents._no) return false;
       const t = norm(text);
       if (/^(oui|o|yes|1)$/.test(t)) return true;
-      if (/^(non|n|no|0)$/.test(t))  return false;
+      if (/^(non|n|no|0)$/.test(t)) return false;
       return null;
     },
     err: "Répondez Oui ou Non.",
@@ -270,8 +419,8 @@ const STEPS = [
     resolve(text, ents) {
       if (ents.standing) return ents.standing;
       const t = norm(text);
-      if (t === "1" || /eco/.test(t))          return "economique";
-      if (t === "2" || /moy|stand/.test(t))    return "moyen";
+      if (t === "1" || /eco/.test(t)) return "economique";
+      if (t === "2" || /moy|stand/.test(t)) return "moyen";
       if (t === "3" || /haut|lux|prem|standing/.test(t)) return "haut";
       return null;
     },
@@ -284,7 +433,7 @@ const STEPS = [
       if (ents.soil) return ents.soil;
       const t = norm(text);
       if (t === "1" || /norm|meuble|sable/.test(t)) return "normal";
-      if (t === "2" || /roch|dur|roc/.test(t))      return "rocheux";
+      if (t === "2" || /roch|dur|roc/.test(t)) return "rocheux";
       return null;
     },
     err: "Répondez 1 (Normal) ou 2 (Rocheux).",
@@ -300,26 +449,20 @@ const STEPS = [
     },
     resolve(text, ents) {
       const t = norm(text);
-      
+
       const hasDigit = /\b[123]\b/.test(t);
       const hasPool = t.includes("piscine") || t.includes("1");
       const hasAc = t.includes("gainable") || t.includes("2");
       const hasHa = t.includes("domotique") || t.includes("3");
-      
+
       if (t === "0" || /aucun|non|rien/.test(t)) {
         return { pool: false, ac: "none", home_automation: false };
       }
-      
+
       if (!hasDigit && !hasPool && !hasAc && !hasHa) {
         return null;
       }
-      
-      let reply = "";
-      if (hasPool) reply += "✅ Piscine ajoutée\n";
-      if (hasAc) reply += "✅ Clim gainable ajoutée\n";
-      if (hasHa) reply += "✅ Domotique ajoutée\n";
-      if (reply) console.log("Options retenues:\n" + reply);
-      
+
       return {
         pool: hasPool,
         ac: hasAc ? "gainable" : "none",
@@ -332,16 +475,16 @@ const STEPS = [
 ];
 
 const CONTACT_STEPS = [
-  { key: "nom",       ask: () => "Pour finaliser, quel est votre nom complet ?" },
+  { key: "nom", ask: () => "Pour finaliser, quel est votre nom complet ?" },
   { key: "telephone", ask: () => "Votre numéro de téléphone ?" },
-  { key: "email",     ask: () => "Votre adresse email ?" },
+  { key: "email", ask: () => "Votre adresse email ?" },
 ];
 
 // ── INTERRUPTS COMMERCIAUX ──────────────────────────────────────────────────
 function checkInterrupt(text) {
   const isQuestion = /[?]|pourquoi|comment|c.est quoi|qu.est.ce|expliqu|défin|peux.tu|pouvez.vous/i.test(text);
   if (!isQuestion) return null;
-  
+
   const interrupts = [
     { re: /\broche\b|\brocheux\b|\bterrain dur\b/i, ans: "Le terrain rocheux nécessite un terrassement spécial (+25 000 DH forfait) et parfois du minage. Nos équipes sont équipées pour ce type de sol." },
     { re: /\bpiscine\b/i, ans: "Nos piscines sont construites en béton armé avec revêtement carrelage ou liner. Forfait base : 130 000 DH (8x4m). Options : système de nage à contre-courant, chauffage, hivernage." },
@@ -349,7 +492,7 @@ function checkInterrupt(text) {
     { re: /\bdomotique\b/i, ans: "Domotique : pilotage éclairage, volets roulants, climatisation, alarme depuis smartphone. Devis sur étude." },
     { re: /\bgarantie\b|\bdecennale\b/i, ans: "Nous offrons une garantie décennale (10 ans) sur tous nos chantiers, conforme à la loi marocaine. Une tranquillité d'esprit totale." }
   ];
-  
+
   for (const { re, ans } of interrupts) {
     if (re.test(text)) return ans;
   }
@@ -380,20 +523,20 @@ function nextMissingStep(data) {
 // ── STATIC REPLIES ENRICHIES ─────────────────────────────────────────────────
 const STATIC = {
   services: () => `🏗️ **SERVICES ERPAC**\n\n${KB.services}\n\n${KB.engagements}`,
-  contact:  () => `📞 **CONTACT ERPAC**\n\nTél: ${KB.phones.join(" / ")}\n✉️ Email: ${KB.email}\n📍 Adresse: ${KB.location}\n\n⏰ Disponible 7j/7 sur WhatsApp.`,
-  projets:  () => `🏆 **RÉALISATIONS ERPAC**\n\n${KB.projets}\n\nPlus de détails sur nos villas de luxe et projets industriels sur demande.`,
-  info:     () => `🏢 **QUI SOMMES-NOUS ?**\n\n${KB.presentation}\n\n${KB.engagements}\n\n${KB.projets}`,
-  human:    () => `👨‍💼 **CONTACT COMMERCIAL**\n\nUn conseiller ERPAC vous rappelle sous 30 min.\n📞 ${KB.phones[0]}\n✉️ ${KB.email}\n\nHeures ouvrables : 8h30 - 18h00 (Lun-Ven)`,
-  luxury:   () => `✨ **PRESTIGE ERPAC**\n\n${KB.luxury}\n\nDemandez notre brochure "Villas d'Exception" pour découvrir nos réalisations.`,
+  contact: () => `📞 **CONTACT ERPAC**\n\nTél: ${KB.phones.join(" / ")}\n✉️ Email: ${KB.email}\n📍 Adresse: ${KB.location}\n\n⏰ Disponible 7j/7 sur WhatsApp.`,
+  projets: () => `🏆 **RÉALISATIONS ERPAC**\n\n${KB.projets}\n\nPlus de détails sur nos villas de luxe et projets industriels sur demande.`,
+  info: () => `🏢 **QUI SOMMES-NOUS ?**\n\n${KB.presentation}\n\n${KB.engagements}\n\n${KB.projets}`,
+  human: () => `👨‍💼 **CONTACT COMMERCIAL**\n\nUn conseiller ERPAC vous rappelle sous 30 min.\n📞 ${KB.phones[0]}\n✉️ ${KB.email}\n\nHeures ouvrables : 8h30 - 18h00 (Lun-Ven)`,
+  luxury: () => `✨ **PRESTIGE ERPAC**\n\n${KB.luxury}\n\nDemandez notre brochure "Villas d'Exception" pour découvrir nos réalisations.`,
   fallback: () => "Je suis votre conseiller ERPAC. Je peux vous aider avec :\n• Un DEVIS personnalisé\n• Nos SERVICES\n• Nos PROJETS de référence\n• Nos coordonnées (CONTACT)\n• Les informations sur l'entreprise (INFO)\n\nQue souhaitez-vous ?",
 };
 
-// ── PROCESS PRINCIPAL AVEC PRIORITÉ COMMERCIALE ──────────────────────────────
+// ── PROCESS PRINCIPAL AVEC GOOGLE SHEETS ─────────────────────────────────────
 function processMessage(sessionId, raw) {
-  const msg  = raw.trim();
+  const msg = raw.trim();
   const sess = getSession(sessionId);
   const ents = extractEntities(msg);
-  
+
   // 1. PRIORITÉ : Salutations (hors tunnel devis/contact)
   if (sess.step === null && sess.contact_idx === null) {
     for (const chat of CHITCHAT) {
@@ -411,7 +554,7 @@ function processMessage(sessionId, raw) {
   }
 
   // 3. Interruptions pendant le devis
-  if (sess.step !== STEPS.findIndex(s => s.key === "options")) {
+  if (sess.step !== null && sess.step !== STEPS.findIndex(s => s.key === "options")) {
     const interrupt = checkInterrupt(msg);
     if (interrupt) {
       const currentStep = sess.step !== null ? STEPS[sess.step] : null;
@@ -422,34 +565,51 @@ function processMessage(sessionId, raw) {
     }
   }
 
-  // 4. Phase de collecte contact
+  // 4. Phase de collecte contact (avec ajout à Google Sheets à la fin)
   if (sess.contact_idx !== null) {
     const idx = sess.contact_idx;
     if (idx < CONTACT_STEPS.length) {
       sess.contact_data[CONTACT_STEPS[idx].key] = msg;
       sess.contact_idx++;
-      
+
       if (sess.contact_idx < CONTACT_STEPS.length) {
         return reply(CONTACT_STEPS[sess.contact_idx].ask(), "contact", sess.data);
       }
-      
+
+      // FIN DU FORMULAIRE - Ajout à Google Sheets
       const cd = sess.contact_data;
-      delete sessions[sessionId];
-      return reply(
-        `✅ **VOTRE DEMANDE EST ENREGISTRÉE**\n\n` +
+      const ed = sess.data;
+
+      // Calcul du TTC pour l'enregistrement
+      const fullEstimate = {
+        ...ed,
+        pool: ed.pool || false,
+        ac: ed.ac || "none",
+        home_automation: ed.home_automation || false,
+      };
+      const estimateResult = calculate_estimate(fullEstimate);
+      const ttcValue = fmt(estimateResult.ttc);
+
+      // AJOUTER LE LEAD À GOOGLE SHEETS
+      addLeadToSheet(cd, ed, ttcValue);
+
+      const summary = `✅ **VOTRE DEMANDE EST ENREGISTRÉE**\n\n` +
         `📋 Client : ${cd.nom}\n` +
         `📞 Tél : ${cd.telephone}\n` +
         `✉️ Email : ${cd.email}\n\n` +
         `🏗️ **Récapitulatif du projet :**\n` +
-        `• Type : ${sess.data.project_type}\n` +
-        `• Ville : ${sess.data.city}\n` +
-        `• Surface : ${sess.data.surface} m²\n` +
-        `• Niveaux : ${sess.data.floors}\n` +
-        `• Standing : ${sess.data.standing}\n\n` +
+        `• Type : ${ed.project_type || '?'}\n` +
+        `• Ville : ${ed.city || '?'}\n` +
+        `• Surface : ${ed.surface || '?'} m²\n` +
+        `• Niveaux : ${ed.floors || 1}\n` +
+        `• Standing : ${ed.standing || 'Moyen'}\n` +
+        `• Montant estimé : ${ttcValue}\n\n` +
         `👨‍💼 **Un ingénieur ERPAC vous contacte sous 24h.**\n` +
-        `📞 ${KB.phones[0]} pour toute urgence.`,
-        "idle", {}
-      );
+        `📞 ${KB.phones[0]} pour toute urgence.\n\n` +
+        `📊 **Votre demande a été ajoutée à notre tableau de bord commercial.**`;
+
+      delete sessions[sessionId];
+      return reply(summary, "idle", {});
     }
   }
 
@@ -491,7 +651,7 @@ function processMessage(sessionId, raw) {
       ac: sess.data.ac || "none",
       home_automation: sess.data.home_automation || false,
     });
-    
+
     sess.contact_idx = 0;
     sess.step = null;
     return reply(
@@ -506,28 +666,28 @@ function processMessage(sessionId, raw) {
 
   // 6. Pas de flow actif - Détection d'intent
   const intent = detectIntent(msg);
-  
+
   if (intent && STATIC[intent]) {
     return reply(STATIC[intent](), "idle", {});
   }
-  
+
   // 7. Démarrage automatique d'un devis
-  if (intent === "devis" || Object.keys(ents).some(k => ["project_type","surface","city"].includes(k))) {
+  if (intent === "devis" || Object.keys(ents).some(k => ["project_type", "surface", "city"].includes(k))) {
     const data = {};
     if (ents.project_type) data.project_type = ents.project_type;
-    if (ents.city)         { data.city = ents.city; data.zone = ents.zone; }
-    if (ents.surface)      data.surface = ents.surface;
-    if (ents.floors)       data.floors = ents.floors;
-    if (ents.standing)     data.standing = ents.standing;
+    if (ents.city) { data.city = ents.city; data.zone = ents.zone; }
+    if (ents.surface) data.surface = ents.surface;
+    if (ents.floors) data.floors = ents.floors;
+    if (ents.standing) data.standing = ents.standing;
     if (ents.basement !== undefined) data.basement = ents.basement;
-    if (ents.soil)         data.soil = ents.soil;
+    if (ents.soil) data.soil = ents.soil;
     if (ents.pool !== undefined || ents.ac || ents.home_automation !== undefined) {
-      data.options = { pool: ents.pool||false, ac: ents.ac||"none", home_automation: ents.home_automation||false };
-      data.pool = ents.pool||false;
-      data.ac = ents.ac||"none";
-      data.home_automation = ents.home_automation||false;
+      data.options = { pool: ents.pool || false, ac: ents.ac || "none", home_automation: ents.home_automation || false };
+      data.pool = ents.pool || false;
+      data.ac = ents.ac || "none";
+      data.home_automation = ents.home_automation || false;
     }
-    
+
     sess.data = data;
     const next = nextMissingStep(sess.data);
     if (next) {
@@ -538,7 +698,7 @@ function processMessage(sessionId, raw) {
         "devis", sess.data
       );
     }
-    
+
     const estimate = renderEstimate(sess.data);
     sess.contact_idx = 0;
     return reply(
@@ -597,7 +757,11 @@ app.post("/estimate", (req, res) => {
   catch (e) { res.status(400).json({ error: e.message }); }
 });
 
-app.get("/health", (_, res) => res.json({ status: "ok", version: "4.0-commercial" }));
+app.get("/health", (_, res) => res.json({ status: "ok", version: "4.0-google-sheets" }));
 
+// Démarrage du serveur
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`🏗️ ERPAC Commercial v4.0 en ligne sur le port ${PORT}`));
+app.listen(PORT, async () => {
+  console.log(`🏗️ ERPAC Commercial v4.0 avec Google Sheets sur le port ${PORT}`);
+  await initGoogleSheets();
+});
