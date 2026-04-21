@@ -1,50 +1,11 @@
 const express = require("express");
-const rateLimit = require("express-rate-limit");
 const { google } = require("googleapis");
 const fs = require("fs");
 const path = require("path");
 
 const app = express();
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  SECURITY MIDDLEWARE (manuel, sans helmet)
-// ─────────────────────────────────────────────────────────────────────────────
-app.use((req, res, next) => {
-  // Security headers
-  res.setHeader("X-Content-Type-Options", "nosniff");
-  res.setHeader("X-Frame-Options", "DENY");
-  res.setHeader("X-XSS-Protection", "1; mode=block");
-  res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
-  next();
-});
-
-app.use(express.json({ limit: "1mb" }));
-
-const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100,
-  message: { error: "Trop de requêtes, veuillez réessayer plus tard." },
-  standardHeaders: true,
-  legacyHeaders: false,
-});
-app.use(limiter);
-
-// Input validation & sanitization
-app.use((req, res, next) => {
-  if (req.body.message !== undefined) {
-    let msg = req.body.message;
-    if (typeof msg !== "string") {
-      return res.status(400).json({ error: "Le message doit être une chaîne de caractères." });
-    }
-    msg = msg.trim();
-    if (msg.length > 1000) {
-      return res.status(400).json({ error: "Message trop long (max 1000 caractères)." });
-    }
-    req.body.message = msg;
-  }
-  next();
-});
-
+app.use(express.json());
 app.use((req, res, next) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
@@ -756,11 +717,11 @@ app.get("/leads", (req, res) => {
   }
 });
 
-app.get("/health", (_, res) => res.json({ status: "ok", version: "6.0-secure-commercial" }));
+app.get("/health", (_, res) => res.json({ status: "ok", version: "6.0-commercial" }));
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, async () => {
-  console.log(`🚀 ERPAC Secure Commercial Bot v6.0 sur le port ${PORT}`);
+  console.log(`🚀 ERPAC Commercial Bot v6.0 sur le port ${PORT}`);
   await initGoogleSheets();
   console.log(`📝 Leads sauvegardés localement dans ${LEADS_FILE}`);
   console.log(`📊 Voir les leads: /leads`);
