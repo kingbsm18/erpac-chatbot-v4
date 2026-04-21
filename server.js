@@ -1,5 +1,4 @@
 const express = require("express");
-const helmet = require("helmet");
 const rateLimit = require("express-rate-limit");
 const { google } = require("googleapis");
 const fs = require("fs");
@@ -8,21 +7,29 @@ const path = require("path");
 const app = express();
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  SECURITY & MIDDLEWARE
+//  SECURITY MIDDLEWARE (manuel, sans helmet)
 // ─────────────────────────────────────────────────────────────────────────────
-app.use(helmet());
+app.use((req, res, next) => {
+  // Security headers
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("X-Frame-Options", "DENY");
+  res.setHeader("X-XSS-Protection", "1; mode=block");
+  res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+  next();
+});
+
 app.use(express.json({ limit: "1mb" }));
 
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // limit each IP to 100 requests per windowMs
+  max: 100,
   message: { error: "Trop de requêtes, veuillez réessayer plus tard." },
   standardHeaders: true,
   legacyHeaders: false,
 });
 app.use(limiter);
 
-// Input validation & sanitization middleware
+// Input validation & sanitization
 app.use((req, res, next) => {
   if (req.body.message !== undefined) {
     let msg = req.body.message;
@@ -104,7 +111,6 @@ async function addLeadToSheet(clientData, estimateData, ttcValue) {
     "Nouveau - À contacter"
   ]];
   try {
-    // Ensure headers exist
     try {
       await sheets.spreadsheets.values.get({ spreadsheetId: SPREADSHEET_ID, range: "Feuil1!A1:Q1" });
     } catch {
@@ -206,7 +212,6 @@ const FAQ = [
   { pattern: /\b(villa haut standing|villa luxe|premium|marbre|zellige)\b/i, reply: `${KB.luxury}\nNos clients Premium bénéficient d'un chef de projet dédié. Puis-je vous faire une proposition ?` },
   { pattern: /\b(delai|retard|plannification|quand|combien de temps)\b/i, reply: "Délais moyens : Villa (6-8 mois), Immeuble R+2 (10-12 mois), Rénovation (2-4 mois). Planning sur-mesure." },
   { pattern: /\b(garantie|decennale|assurance|fiabilité)\b/i, reply: "Assurance décennale obligatoire + garantie de parfait achèvement 1 an. Tranquillité d'esprit totale." },
-  // New FAQ triggers
   { pattern: /\b(mobilier sur mesure|meuble|armoire|cuisine sur mesure)\b/i, reply: "Nos ateliers conçoivent des meubles sur mesure (bois, MDF, laqué). Étude gratuite. Voulez-vous un devis pour votre mobilier ?" },
   { pattern: /\b(menuiserie|fenêtre|porte|bois|aluminium|pvc)\b/i, reply: "Menuiserie haut de gamme : bois massif, aluminium thermolaqué, PVC haute performance. Isolation et esthétique garanties. Souhaitez-vous un devis ?" },
   { pattern: /\b(rénovation|renovation|réhabilitation|remise à neuf)\b/i, reply: "Rénovation complète ou partielle : nous transformons votre espace (appartement, villa, bureau). Devis gratuit sur étude." },
@@ -230,7 +235,7 @@ const INTENT_MAP = [
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  PLATFORM FEATURES MODULE
+//  PLATFORM FEATURES
 // ─────────────────────────────────────────────────────────────────────────────
 const FEATURES = {
   faq_automation: true,
@@ -245,7 +250,7 @@ const FEATURES = {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  NLU HELPERS (unchanged, but reused)
+//  NLU HELPERS
 // ─────────────────────────────────────────────────────────────────────────────
 const CITY_MAP = [
   { pattern: /\b(casa|casablanca|kaza|ddar|bouskoura|ain diab|anfa)\b/i,   city: "Casablanca", zone: "A" },
@@ -328,7 +333,7 @@ function extractEntities(text) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  CALCULATION ENGINE (unchanged)
+//  CALCULATION ENGINE
 // ─────────────────────────────────────────────────────────────────────────────
 const ZONES = { A: 1.15, B: 1.10, C: 1.05, D: 1.00 };
 const RATES = {
@@ -392,7 +397,7 @@ function renderEstimate(d) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  STATE MACHINE (STEPS, SESSIONS)
+//  STATE MACHINE
 // ─────────────────────────────────────────────────────────────────────────────
 const STEPS = [
   {
@@ -513,7 +518,7 @@ const CONTACT_STEPS = [
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  CHITCHAT & INTERRUPTS (enhanced but unchanged structure)
+//  CHITCHAT & INTERRUPTS
 // ─────────────────────────────────────────────────────────────────────────────
 const CHITCHAT = [
   { pattern: /\b(salut|bonjour|salam|hello|hi|hey)\b/i, reply: "Bonjour ! Je suis votre conseiller commercial virtuel ERPAC. Comment puis-je vous aider ?" },
@@ -537,7 +542,7 @@ function checkInterrupt(text) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  STATIC RESPONSES (upgraded)
+//  STATIC RESPONSES
 // ─────────────────────────────────────────────────────────────────────────────
 const STATIC = {
   services: () => `🏗️ **SERVICES ERPAC**\n\n${KB.services.map(s => `✅ ${s.name} : ${s.desc}`).join("\n")}\n\n${KB.engagements}`,
@@ -570,21 +575,21 @@ function nextMissingStep(data) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  PROCESS MESSAGE (integrates all enhancements)
+//  PROCESS MESSAGE
 // ─────────────────────────────────────────────────────────────────────────────
 function processMessage(sessionId, raw) {
   const msg = raw.trim();
   const sess = getSession(sessionId);
   const ents = extractEntities(msg);
 
-  // 1. Priority: chitchat
+  // 1. Chitchat
   if (sess.step === null && sess.contact_idx === null) {
     for (const chat of CHITCHAT) {
       if (chat.pattern.test(msg)) return reply(chat.reply, "idle", {});
     }
   }
 
-  // 2. FAQ expert answers
+  // 2. FAQ
   for (const item of FAQ) {
     if (item.pattern.test(msg)) return reply(item.reply, "idle", {});
   }
@@ -599,7 +604,7 @@ function processMessage(sessionId, raw) {
     }
   }
 
-  // 4. Contact collection phase
+  // 4. Contact collection
   if (sess.contact_idx !== null) {
     const idx = sess.contact_idx;
     if (idx < CONTACT_STEPS.length) {
@@ -683,9 +688,8 @@ function processMessage(sessionId, raw) {
     return reply(`${estimate}\n\n${CONTACT_STEPS[0].ask()}`, "contact", sess.data);
   }
 
-  // 8. RDV / appointment booking (lead capture)
+  // 8. RDV / appointment booking
   if (intent === "rdv") {
-    // trigger lead capture immediately
     sess.contact_idx = 0;
     return reply(`📅 **Prise de rendez-vous**\n\nMerci ! Pour vous proposer un créneau, indiquez-moi vos disponibilités (jour et heure approximative).\n\n${CONTACT_STEPS[0].ask()}`, "contact", sess.data);
   }
