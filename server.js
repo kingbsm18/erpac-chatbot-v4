@@ -1,4 +1,7 @@
 const express = require("express");
+const nodemailer = require("nodemailer");
+const fs = require('fs');
+const path = require('path');
 const app = express();
 
 app.use(express.json());
@@ -14,9 +17,23 @@ const WA_TOKEN = process.env.WA_TOKEN;
 const WA_PHONE_ID = process.env.WA_PHONE_ID;
 const WA_VERIFY_TOKEN = process.env.WA_VERIFY_TOKEN || "erpac_verify";
 
-// ── LEADS STOCKAGE LOCAL ─────────────────────────────────────────────────────
-const fs = require('fs');
-const path = require('path');
+// ── CONFIGURATION EMAIL (Alertes dirigeant) ─────────────────────────────────
+const EMAIL_FOUNDER = process.env.EMAIL_FOUNDER || "adam@erpac.ma";
+const EMAIL_USER = process.env.EMAIL_USER;
+const EMAIL_PASS = process.env.EMAIL_PASS;
+
+let transporter = null;
+if (EMAIL_USER && EMAIL_PASS) {
+  transporter = nodemailer.createTransport({
+    service: 'gmail',
+    auth: { user: EMAIL_USER, pass: EMAIL_PASS }
+  });
+  console.log("✅ Email alert system configured");
+} else {
+  console.warn("⚠️ Email credentials missing - alerts disabled");
+}
+
+// ── STOCKAGE LOCAL DES LEADS (fallback) ─────────────────────────────────────
 const LEADS_FILE = path.join(__dirname, 'leads.json');
 
 function saveLeadToFile(clientData, estimateData, ttcValue) {
@@ -25,13 +42,19 @@ function saveLeadToFile(clientData, estimateData, ttcValue) {
     date_fr: new Date().toLocaleString('fr-MA', { timeZone: 'Africa/Casablanca' }),
     client: clientData,
     project: {
-      service: estimateData.service || estimateData.project_type || '',
+      type: estimateData.project_type || '',
+      city: estimateData.city || '',
       surface: estimateData.surface || '',
-      budget: estimateData.budget || '',
-      terrain: estimateData.terrain || ''
+      floors: estimateData.floors || 1,
+      standing: estimateData.standing || 'Moyen',
+      basement: estimateData.basement || false,
+      soil: estimateData.soil || 'normal',
+      pool: estimateData.pool || false,
+      ac: estimateData.ac || 'none',
+      home_automation: estimateData.home_automation || false
     },
     amount: ttcValue,
-    status: 'Nouveau'
+    status: 'Nouveau - À contacter'
   };
   
   let leads = [];
@@ -42,396 +65,463 @@ function saveLeadToFile(clientData, estimateData, ttcValue) {
   }
   leads.push(lead);
   fs.writeFileSync(LEADS_FILE, JSON.stringify(leads, null, 2));
-  console.log(`✅ Lead sauvegardé: ${clientData.nom} - ${clientData.telephone}`);
+  console.log(`✅ Lead sauvegardé localement: ${clientData.nom} - ${clientData.telephone}`);
   return true;
 }
 
-// ── BASE DE CONNAISSANCES ERPAC ─────────────────────────────────────────────
+// ── KB ENRICHIE (Version Commerciale) ───────────────────────────────────────
 const KB = {
-  company: {
-    name: "ERPAC SARL",
-    founded: 2020,
-    location: "Rue Dakar, Imm N°5 Appt 1, Océan – Rabat",
-    ceo: "Mustapha ESSARHANI (Ingénieur Génie Civil)",
-    cfo: "Maroua ZITOUNI (Architecte d'Intérieur)",
-    projects: 456,
-    clients: 513,
-    engineers: 53,
-    experience: "10+ ans",
-    hours: "Lundi – Samedi : 8h30 – 16h30 | Dimanche : Fermé"
-  },
-  values: ["Excellence", "Confiance", "Ambition", "Convivialité", "Proximité"],
-  services: [
-    { id: 1, name_fr: "Études des Projets", name_ar: "دراسة المشاريع", name_en: "Project Studies" },
-    { id: 2, name_fr: "Construction Générale", name_ar: "البناء العام", name_en: "General Construction" },
-    { id: 3, name_fr: "Aménagement & Décoration", name_ar: "التهيئة والديكور", name_en: "Interior Design" },
-    { id: 4, name_fr: "Lots Techniques", name_ar: "الأشغال التقنية", name_en: "Technical Works" },
-    { id: 5, name_fr: "Étanchéité", name_ar: "العزل المائي", name_en: "Waterproofing" },
-    { id: 6, name_fr: "Construction de Piscines", name_ar: "بناء المسابح", name_en: "Pool Construction" },
-    { id: 7, name_fr: "Gros Œuvre", name_ar: "الأشغال الكبرى", name_en: "Structural Work" },
-    { id: 8, name_fr: "Aménagement & Réhabilitation", name_ar: "التهيئة وإعادة التأهيل", name_en: "Renovation" },
-    { id: 9, name_fr: "Mobilier sur Mesure", name_ar: "الأثاث حسب الطلب", name_en: "Custom Furniture" },
-    { id: 10, name_fr: "Menuiserie", name_ar: "النجارة", name_en: "Carpentry" },
-    { id: 11, name_fr: "Cloisonnement", name_ar: "الفواصل", name_en: "Partitioning" }
-  ],
-  contacts: {
-    phone: ["+212 669 078 556", "+212 537 222 222"],
-    email: "info@erpac.ma",
-    website: "www.erpac.ma"
-  }
+  name: "ERPAC (Entreprise de Réalisation de Projets d'Aménagement et de Construction)",
+  phones: ["+212 669 078 556", "+212 537 222 222"],
+  email: "info@erpac.ma",
+  location: "Rue Dakar, Imm N°5 Appt 1, Océan – Rabat",
+  presentation: "ERPAC est une entreprise de BTP qualifiée par le ministère de l'Habitat. Nous sommes experts en Gros Œuvre, Aménagement et Étanchéité depuis plus de 10 ans.",
+  services: "• Construction de Villas & Immeubles\n• Étanchéité (Toitures, Terrasses, Sous-sols)\n• Aménagement intérieur & Décoration de luxe\n• Charpente Métallique & Hangars Industriels\n• Construction de Piscines & Espaces verts",
+  projets: "Nous avons réalisé plus de 456 projets, dont la Clinique d'Agdal, des Hangars à Mohammedia et des Villas de haut standing à Harhoura et Rabat.",
+  engagements: "Qualité technique, Respect des délais, et Accompagnement architectural personnalisé.",
+  luxury: "Nos Villas Haut Standing : finitions premium, domotique intégrée, piscine à débordement, matériaux nobles (marbre, zellige, bois exotique). Réalisations à Rabat, Casablanca, Marrakech."
 };
 
-// ── MULTILINGUISME ─────────────────────────────────────────────────────────
-const lang = {
-  fr: {
-    welcome: "Bonjour ! Je suis l'assistant virtuel d'ERPAC. Comment puis-je vous aider ?\n\n🇫🇷 Français | 🇬🇧 English | 🇸🇦 العربية\n\nTapez :\n• SERVICES\n• DEVIS\n• CONTACT\n• PROJETS\n• HORAIRES",
-    services: "📋 **Nos 11 services :**\n\n" + KB.services.map(s => `${s.id}. ${s.name_fr}`).join("\n"),
-    devis_start: "📊 Je vais vous aider à obtenir un devis gratuit. Quel service vous intéresse ?\n\n" + KB.services.map(s => `${s.id}. ${s.name_fr}`).join("\n"),
-    contact: `📞 **Nous contacter**\n\nTél: ${KB.contacts.phone.join(" / ")}\n✉️ Email: ${KB.contacts.email}\n📍 ${KB.company.location}\n⏰ ${KB.company.hours}`,
-    surface: "📐 Quelle est la surface approximative (m²) ?",
-    budget: "💰 Quel est votre budget estimatif ?",
-    terrain: "🏞️ Avez-vous déjà un terrain ? (Oui/Non)",
-    name: "👤 Votre nom complet ?",
-    phone: "📞 Votre numéro de téléphone ?",
-    email: "✉️ Votre adresse email ?",
-    projects: "🏆 **NOS RÉALISATIONS**\n\n• Villas de luxe: Rabat, Casablanca, Marrakech\n• Clinique d'Agdal\n• Hangars à Mohammedia\n• Restaurants à Marrakech\n\n📸 Visitez www.erpac.ma pour voir la galerie complète.",
-    hours: `⏰ **Horaires ERPAC**\n${KB.company.hours}`,
-    info: `🏢 **ERPAC SARL**\n\nCréation: 2020\nCEO: Mustapha ESSARHANI\nProjets: 456+\nClients: 513+\nExpérience: 10+ ans\nValeurs: Excellence, Confiance, Ambition, Convivialité, Proximité`,
-    confirm: "✅ Votre demande a bien été enregistrée !",
-    fallback: "Je n'ai pas compris. Tapez : SERVICES, DEVIS, CONTACT, PROJETS, HORAIRES ou INFO"
-  },
-  ar: {
-    welcome: "مرحباً! أنا المساعد الافتراضي لشركة إيرباك.\n\n🇫🇷 Français | 🇬🇧 English | 🇸🇦 العربية\n\nاكتب:\n• SERVICES\n• DEVIS\n• CONTACT\n• PROJETS\n• HORAIRES",
-    services: "📋 **خدماتنا:**\n\n" + KB.services.map(s => `${s.id}. ${s.name_ar}`).join("\n"),
-    devis_start: "📊 ما الخدمة التي تهمك؟\n\n" + KB.services.map(s => `${s.id}. ${s.name_ar}`).join("\n"),
-    contact: `📞 **اتصل بنا**\n\nهاتف: ${KB.contacts.phone.join(" / ")}\n✉️ بريد: ${KB.contacts.email}\n📍 ${KB.company.location}\n⏰ ${KB.company.hours}`,
-    surface: "📐 ما هي المساحة التقريبية (م²)؟",
-    budget: "💰 ما هي ميزانيتك التقديرية؟",
-    terrain: "🏞️ هل لديك أرض بالفعل؟ (نعم/لا)",
-    name: "👤 الاسم الكامل؟",
-    phone: "📞 رقم الهاتف؟",
-    email: "✉️ البريد الإلكتروني؟",
-    projects: "🏆 **مشاريعنا**\n\n• فلل فاخرة: الرباط، الدار البيضاء، مراكش\n• عيادة أكدال\n• مستودعات في المحمدية\n• مطاعم في مراكش\n\n📸 تفضل بزيارة موقعنا للمعرض الكامل: www.erpac.ma",
-    hours: `⏰ **مواعيد إيرباك**\n${KB.company.hours}`,
-    info: `🏢 **إيرباك**\n\nالتأسيس: 2020\nالمدير: مصطفى الصحراني\nالمشاريع: 456+\nالعملاء: 513+\nالخبرة: 10+ سنوات`,
-    confirm: "✅ تم تسجيل طلبك بنجاح!",
-    fallback: "لم أفهم. اكتب: SERVICES, DEVIS, CONTACT, PROJETS, HORAIRES"
-  },
-  en: {
-    welcome: "Hello! I'm ERPAC's virtual assistant.\n\n🇫🇷 Français | 🇬🇧 English | 🇸🇦 العربية\n\nType:\n• SERVICES\n• QUOTE\n• CONTACT\n• PROJECTS\n• HOURS",
-    services: "📋 **Our 11 services:**\n\n" + KB.services.map(s => `${s.id}. ${s.name_en}`).join("\n"),
-    devis_start: "📊 Which service interests you?\n\n" + KB.services.map(s => `${s.id}. ${s.name_en}`).join("\n"),
-    contact: `📞 **Contact us**\n\nPhone: ${KB.contacts.phone.join(" / ")}\n✉️ Email: ${KB.contacts.email}\n📍 ${KB.company.location}\n⏰ ${KB.company.hours}`,
-    surface: "📐 What is the approximate area (m²)?",
-    budget: "💰 What is your estimated budget?",
-    terrain: "🏞️ Do you already have land? (Yes/No)",
-    name: "👤 Your full name?",
-    phone: "📞 Your phone number?",
-    email: "✉️ Your email address?",
-    projects: "🏆 **OUR PROJECTS**\n\n• Luxury villas: Rabat, Casablanca, Marrakech\n• Agdal Clinic\n• Warehouses in Mohammedia\n• Restaurants in Marrakech\n\n📸 Visit www.erpac.ma for the full gallery.",
-    hours: `⏰ **ERPAC Hours**\n${KB.company.hours}`,
-    info: `🏢 **ERPAC SARL**\n\nFounded: 2020\nCEO: Mustapha ESSARHANI\nProjects: 456+\nClients: 513+\nExperience: 10+ years`,
-    confirm: "✅ Your request has been saved!",
-    fallback: "I didn't understand. Type: SERVICES, QUOTE, CONTACT, PROJECTS, HOURS"
-  }
-};
+// ── SMALL TALK & QUESTIONS COMMERCIALES ──────────────────────────────────────
+const CHITCHAT = [
+  { pattern: /\b(salut|bonjour|salam|hello|hi|hey)\b/i, reply: "Bonjour ! Ravi de vous accueillir chez ERPAC. Je suis votre conseiller commercial virtuel. Comment puis-je vous aider ?" },
+  { pattern: /\b(ca va|cava|labas|labess|comment vas tu)\b/i, reply: "Je vais très bien, merci ! Prêt à concrétiser vos projets de construction. Que puis-je faire pour vous ?" },
+  { pattern: /\b(merci|shokran|chokran)\b/i, reply: "Je vous en prie ! Nous restons à votre entière disposition pour transformer vos plans en réalité." },
+  { pattern: /\b(au revoir|bye|a plus|bslama)\b/i, reply: "Au revoir ! Merci d'avoir contacté ERPAC. À très bientôt pour vos futurs chantiers." }
+];
 
-// ── DÉTECTION ─────────────────────────────────────────────────────────────
-function detectLang(text) {
-  if (/[\u0600-\u06FF]/.test(text)) return 'ar';
-  if (/bonjour|salut|merci|devis|service|contact|projet|prix|combien|comment|travaux|construction/i.test(text)) return 'fr';
-  return 'en';
+const FAQ = [
+  { pattern: /\b(etancheite|étanchéité|fuite|humidite|infiltration)\b/i, reply: "L'étanchéité est l'une de nos grandes spécialités (terrasses, piscines, sous-sols). Nous utilisons des membranes de haute qualité (Sika, Soprema) avec garantie 10 ans. Souhaitez-vous un devis pour vos travaux d'étanchéité ?" },
+  { pattern: /\b(hangar|industriel|depot|entrepôt|dépôt)\b/i, reply: "Pour le secteur industriel, nous réalisons des hangars en charpente métallique ou béton avec dallage industriel haute résistance (charge 5T/m²). Pouvons-nous vous établir une estimation ?" },
+  { pattern: /\b(architecte|plan|permis|autorisation|pc)\b/i, reply: "Nous vous accompagnons dès la phase de conception avec nos partenaires architectes agréés. Nous gérons le dépôt du permis de construire et le suivi administratif." },
+  { pattern: /\b(villa haut standing|villa luxe|premium|marbre|zellige)\b/i, reply: `${KB.luxury}\n\nNos clients haut standing bénéficient d'un suivi personnalisé avec un chef de projet dédié. Puis-je vous faire une proposition ?` },
+  { pattern: /\b(delai|retard|plannification|quand|combien de temps)\b/i, reply: "Nos délais moyens : Villa (6-8 mois), Immeuble R+2 (10-12 mois), Rénovation (2-4 mois). Chaque projet a son planning sur-mesure." },
+  { pattern: /\b(garantie|decennale|assurance|fiabilité)\b/i, reply: "Tous nos chantiers sont couverts par une assurance décennale. Nous offrons une garantie de parfait achèvement d'un an et une garantie biennale sur les équipements." }
+];
+
+// ── NLU (Amélioré avec pluriels) ────────────────────────────────────────────
+const CITY_MAP = [
+  { pattern: /\b(casa|casablanca|kaza|ddar|bouskoura|ain diab|anfa)\b/i, city: "Casablanca", zone: "A" },
+  { pattern: /\b(rabat|rbat|agdal|souissi|iberia|harhoura)\b/i, city: "Rabat", zone: "A" },
+  { pattern: /\b(mohammedia)\b/i, city: "Mohammedia", zone: "A" },
+  { pattern: /\b(marrakech|mre|kech|gueliz|hivernage)\b/i, city: "Marrakech", zone: "B" },
+  { pattern: /\b(tanger|tanjah|tanja|malabata)\b/i, city: "Tanger", zone: "B" },
+  { pattern: /\b(kenitra)\b/i, city: "Kénitra", zone: "B" },
+  { pattern: /\b(agadir|gadir|agdz)\b/i, city: "Agadir", zone: "C" },
+  { pattern: /\b(fes|fez|f[eè]s)\b/i, city: "Fès", zone: "C" },
+  { pattern: /\b(meknes|mekn[eè]s)\b/i, city: "Meknès", zone: "C" },
+  { pattern: /\b(oujda)\b/i, city: "Oujda", zone: "C" },
+];
+
+const INTENT_MAP = [
+  { intent: "devis", pattern: /\b(devis?|prix|estimation|combien|tarif|cout|coût|facture|budget)\b/i },
+  { intent: "services", pattern: /\b(services?|prestations?|offres?|travaux|construction|amenagement|étanchéité|piscines?|charpente|hangars?)\b/i },
+  { intent: "projets", pattern: /\b(projets?|réalisations?|references?|villas?|restaurants?|cliniques?|hangars?|chantiers?)\b/i },
+  { intent: "contact", pattern: /\b(contacts?|téléphones?|telephones?|emails?|adresses?|joindre|appeler|whatsapp)\b/i },
+  { intent: "info", pattern: /\b(qui|erpac|société|entreprise|experience|présent|histoire|presentation)\b/i },
+  { intent: "human", pattern: /\b(humains?|conseillers?|agents?|parler|personnes?|appel|rdv|rencontrer)\b/i },
+  { intent: "luxury", pattern: /\b(luxe|premium|haut standing|marbre|zellige|domotique|standing)\b/i },
+];
+
+function norm(s) {
+  return s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
 }
 
-function detectService(text, l) {
-  const t = text.toLowerCase();
-  for (let i = 0; i < KB.services.length; i++) {
-    const s = KB.services[i];
-    const names = [s.name_fr.toLowerCase(), s.name_ar.toLowerCase(), s.name_en.toLowerCase()];
-    if (names.some(n => t.includes(n))) return s;
-  }
-  const numMatch = t.match(/\b([1-9]|10|11)\b/);
-  if (numMatch) {
-    const num = parseInt(numMatch[1]);
-    return KB.services.find(s => s.id === num);
+function detectCity(text) {
+  for (const { pattern, city, zone } of CITY_MAP) {
+    if (pattern.test(text)) return { city, zone };
   }
   return null;
 }
 
-function detectIntent(text, l) {
-  const t = text.toLowerCase();
-  if (/devis|prix|estimation|combien|quote|عرض سعر/.test(t)) return "devis";
-  if (/service|prestation|offre|خدمات/.test(t)) return "services";
-  if (/contact|telephone|email|whatsapp|اتصل/.test(t)) return "contact";
-  if (/projet|realisation|villa|immeuble|مشاريع/.test(t)) return "projects";
-  if (/horaire|heure|ouverture|مواعيد/.test(t)) return "hours";
-  if (/info|entreprise|societe|qui|شركة/.test(t)) return "info";
+function detectIntent(text) {
+  for (const { intent, pattern } of INTENT_MAP) {
+    if (pattern.test(text)) return intent;
+  }
   return null;
 }
 
-// ── SESSIONS ────────────────────────────────────────────────────────────────
+function extractEntities(text) {
+  const t = norm(text);
+  const out = {};
+
+  const surfM = text.match(/(?<!\d)\b(\d{2,4})\s*m[²2]/i);
+  if (surfM) out.surface = parseFloat(surfM[1]);
+  
+  const justNumber = text.match(/^\s*(\d{2,4})\s*$/);
+  if (justNumber && !surfM) out.surface = parseFloat(justNumber[1]);
+
+  const floorsM = text.match(/[rR]\+(\d)/);
+  if (floorsM) out.floors = parseInt(floorsM[1]) + 1;
+  if (/\brdc\b/i.test(text)) out.floors = 1;
+  if (/\brénovation\b/i.test(text) && floorsM) delete out.floors;
+
+  if (/sous[\s-]?sol/i.test(text)) out.basement = true;
+  if (/pas de sous[\s-]?sol/i.test(text)) out.basement = false;
+  if (/\bsans sous[\s-]?sol\b/i.test(text)) out.basement = false;
+
+  if (/\bpiscine\b/i.test(text) && !/villa|immeuble/i.test(text)) out.pool = true;
+  if (/sans piscine/i.test(text)) out.pool = false;
+
+  if (/\bgainable\b/i.test(text)) out.ac = "gainable";
+  else if (/\bsplit\b/i.test(text)) out.ac = "split";
+  else if (/\bclim\b/i.test(text) && !/\bclimat\b/i.test(text)) out.ac = "split";
+
+  if (/domotique|smart home/i.test(text)) out.home_automation = true;
+
+  if (/\b(rocheux|roche|dur|roc|pierreux)\b/i.test(text)) out.soil = "rocheux";
+  if (/\bterrain normal\b|\bsol normal\b/i.test(text)) out.soil = "normal";
+
+  const ptM = t.match(/\b(villa|immeuble|appartement|rénovation|renovation|industriel|hangar)\b/);
+  if (ptM) {
+    const map = { villa: "villa", immeuble: "immeuble", appartement: "immeuble", "rénovation": "renovation", renovation: "renovation", industriel: "industriel", hangar: "industriel" };
+    out.project_type = map[ptM[1]] || ptM[1];
+  }
+
+  if (/\béconom/i.test(text) && !/\béconomie\b/.test(t)) out.standing = "economique";
+  else if (/\b(moyen|standard|milieu)\b/i.test(text)) out.standing = "moyen";
+  else if (/\b(haut|luxe|premium|standing)\b/i.test(text)) out.standing = "haut";
+
+  if (/\boui\b|\byes\b|\b(si|ok|d'accord)\b/i.test(t) && Object.keys(out).length === 0) out._yes = true;
+  if (/\bnon\b|\bno\b|\bnope\b/i.test(t) && Object.keys(out).length === 0) out._no = true;
+
+  const cityR = detectCity(text);
+  if (cityR) { out.city = cityR.city; out.zone = cityR.zone; }
+
+  return out;
+}
+
+// ── CALCULATION ENGINE ───────────────────────────────────────────────────────
+const ZONES = { A: 1.15, B: 1.10, C: 1.05, D: 1.00 };
+const RATES = {
+  economique: { gros: 3000, fin: 900 },
+  moyen: { gros: 5500, fin: 1600 },
+  haut: { gros: 10000, fin: 3000 },
+};
+const PROJ_COEFF = { villa: 1.00, immeuble: 1.05, renovation: 0.60, industriel: 0.80 };
+const TVA = 0.20, IMPREVU = 0.07, HONO = 0.08;
+const ADD = { basement: 2000, soil: 25000, pool: 130000, ac_gainable: 500, home_auto: 800 };
+
+function fmt(n) { return Math.round(n).toLocaleString("fr-MA") + " DH"; }
+
+function calculate_estimate(d) {
+  const zf = ZONES[d.zone] || 1.00;
+  const r = RATES[d.standing] || RATES.moyen;
+  const pc = PROJ_COEFF[d.project_type] || 1.00;
+  const s = d.surface, f = d.floors || 1;
+
+  let gros = r.gros * zf * pc * s * f;
+  if (d.basement) gros += ADD.basement * s;
+  if (d.soil === "rocheux") gros += ADD.soil;
+
+  let fin = r.fin * zf * s * f;
+  let opts = 0;
+  if (d.pool) opts += ADD.pool;
+  if (d.ac === "gainable") opts += ADD.ac_gainable * s;
+  if (d.home_automation) opts += ADD.home_auto * s;
+
+  const base = gros + fin;
+  const hono = base * HONO;
+  const ht = base + opts + hono;
+  const imp = ht * IMPREVU;
+  const tva = (ht + imp) * TVA;
+  const ttc = ht + imp + tva;
+
+  return { gros, fin, opts, hono, ht, imp, tva, ttc };
+}
+
+function renderEstimate(d) {
+  const e = calculate_estimate(d);
+  const standing_labels = { economique: "Économique", moyen: "Moyen", haut: "Haut Standing" };
+  return [
+    `━━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
+    `📊 AVANT-MÉTRÉ ERPAC 2026`,
+    `${d.project_type.toUpperCase()} | ${d.city} | Zone ${d.zone} | ${standing_labels[d.standing]}`,
+    `━━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
+    `🏗  Gros Œuvre        : ${fmt(e.gros)}`,
+    `🪟  Second Œuvre      : ${fmt(e.fin)}`,
+    `🔧  Options           : ${fmt(e.opts)}`,
+    `📐  Honoraires (8%)   : ${fmt(e.hono)}`,
+    `    ────────────────────────`,
+    `💰  Total HT          : ${fmt(e.ht)}`,
+    `🛡   Imprévus (7%)    : ${fmt(e.imp)}`,
+    `🧾  TVA 20%           : ${fmt(e.tva)}`,
+    `    ────────────────────────`,
+    `✅  TOTAL TTC         : ${fmt(e.ttc)}`,
+    `━━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
+    `⚠️  Indicatif – fer & ciment volatils 2026.`,
+    `📞 ${KB.phones[0]}  ✉️ ${KB.email}`,
+  ].join("\n");
+}
+
+// ── ALERTE DIRIGEANT PAR EMAIL ──────────────────────────────────────────────
+async function sendLeadToFounder(clientData, estimateData, ttcValue) {
+  // Sauvegarde locale toujours active
+  saveLeadToFile(clientData, estimateData, ttcValue);
+  
+  if (!transporter) {
+    console.log("Email alerts disabled - missing credentials");
+    return;
+  }
+
+  const mailOptions = {
+    from: `"ERPAC Bot" <${EMAIL_USER}>`,
+    to: EMAIL_FOUNDER,
+    subject: `🚨 NOUVEAU LEAD DEVIS - ${clientData.nom}`,
+    html: `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <style>
+          body { font-family: Arial, sans-serif; margin: 0; padding: 20px; background: #f5f5f5; }
+          .container { max-width: 600px; margin: 0 auto; background: white; border-radius: 10px; overflow: hidden; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+          .header { background: #1a472a; color: white; padding: 20px; text-align: center; }
+          .header h1 { margin: 0; font-size: 24px; }
+          .content { padding: 20px; }
+          .section { margin-bottom: 25px; border-bottom: 1px solid #eee; padding-bottom: 15px; }
+          .section h2 { color: #1a472a; font-size: 18px; margin-bottom: 10px; }
+          .info-row { display: flex; margin-bottom: 8px; }
+          .info-label { font-weight: bold; width: 120px; }
+          .info-value { flex: 1; }
+          .total { background: #e8f5e9; padding: 15px; border-radius: 8px; text-align: center; margin-top: 20px; }
+          .total .amount { font-size: 28px; font-weight: bold; color: #1a472a; }
+          .footer { background: #f9f9f9; padding: 15px; text-align: center; font-size: 12px; color: #666; }
+          .badge { display: inline-block; background: #ff6b35; color: white; padding: 5px 10px; border-radius: 5px; font-size: 12px; margin-left: 10px; }
+          .contact-btn { display: inline-block; background: #25D366; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; margin-top: 10px; }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <div class="header">
+            <h1>🏗️ NOUVEAU LEAD ERPAC</h1>
+            <p>Devis généré automatiquement</p>
+          </div>
+          <div class="content">
+            <div class="section">
+              <h2>📋 Informations Client</h2>
+              <div class="info-row"><div class="info-label">Nom :</div><div class="info-value">${clientData.nom}</div></div>
+              <div class="info-row"><div class="info-label">Téléphone :</div><div class="info-value"><a href="tel:${clientData.telephone}">${clientData.telephone}</a></div></div>
+              <div class="info-row"><div class="info-label">Email :</div><div class="info-value"><a href="mailto:${clientData.email}">${clientData.email}</a></div></div>
+            </div>
+            
+            <div class="section">
+              <h2>🏠 Détails du Projet</h2>
+              <div class="info-row"><div class="info-label">Type :</div><div class="info-value">${estimateData.project_type?.toUpperCase() || 'Non spécifié'}</div></div>
+              <div class="info-row"><div class="info-label">Ville :</div><div class="info-value">${estimateData.city || 'Non spécifiée'}</div></div>
+              <div class="info-row"><div class="info-label">Surface :</div><div class="info-value">${estimateData.surface || '?'} m²</div></div>
+              <div class="info-row"><div class="info-label">Niveaux :</div><div class="info-value">${estimateData.floors || 1}</div></div>
+              <div class="info-row"><div class="info-label">Standing :</div><div class="info-value">${estimateData.standing || 'Moyen'} ${estimateData.standing === 'haut' ? '<span class="badge">PREMIUM</span>' : ''}</div></div>
+              <div class="info-row"><div class="info-label">Sous-sol :</div><div class="info-value">${estimateData.basement ? '✅ Oui' : '❌ Non'}</div></div>
+              <div class="info-row"><div class="info-label">Terrain :</div><div class="info-value">${estimateData.soil === 'rocheux' ? 'Rocheux (+25000 DH)' : 'Normal'}</div></div>
+            </div>
+            
+            <div class="section">
+              <h2>🔧 Options</h2>
+              <div class="info-row"><div class="info-label">Piscine :</div><div class="info-value">${estimateData.pool ? '✅ Oui (+130k DH)' : '❌ Non'}</div></div>
+              <div class="info-row"><div class="info-label">Clim gainable :</div><div class="info-value">${estimateData.ac === 'gainable' ? '✅ Oui' : '❌ Non'}</div></div>
+              <div class="info-row"><div class="info-label">Domotique :</div><div class="info-value">${estimateData.home_automation ? '✅ Oui' : '❌ Non'}</div></div>
+            </div>
+            
+            <div class="total">
+              <div>💰 MONTANT TOTAL TTC</div>
+              <div class="amount">${ttcValue}</div>
+              <a href="https://wa.me/${clientData.telephone.replace(/[^0-9]/g, '')}" class="contact-btn">📞 Contacter ce client sur WhatsApp</a>
+            </div>
+          </div>
+          <div class="footer">
+            Email généré automatiquement par le Bot Commercial ERPAC<br>
+            ${new Date().toLocaleString('fr-MA')}
+          </div>
+        </div>
+      </body>
+      </html>
+    `
+  };
+
+  try {
+    await transporter.sendMail(mailOptions);
+    console.log(`✅ Email alert sent to ${EMAIL_FOUNDER} for lead ${clientData.nom}`);
+  } catch (error) {
+    console.error("❌ Email sending error:", error.message);
+  }
+}
+
+// ── STATE MACHINE ────────────────────────────────────────────────────────────
+const STEPS = [
+  {
+    key: "project_type",
+    ask: () => "Type de projet ?\n1. Villa\n2. Immeuble\n3. Rénovation\n4. Industriel/Hangar",
+    resolve(text, ents) {
+      if (ents.project_type) return ents.project_type;
+      const t = norm(text);
+      if (t === "1" || t === "villa") return "villa";
+      if (t === "2" || t === "immeuble") return "immeuble";
+      if (t === "3" || /rénov|renov/.test(t)) return "renovation";
+      if (t === "4" || t === "industriel" || t === "hangar") return "industriel";
+      return null;
+    },
+    err: "Répondez 1 (Villa), 2 (Immeuble), 3 (Rénovation) ou 4 (Industriel/Hangar).",
+  },
+  {
+    key: "city",
+    ask: () => "Ville du projet ?",
+    resolve(text, ents) {
+      if (ents.city) return { city: ents.city, zone: ents.zone };
+      const w = text.trim();
+      if (w.length >= 3) return { city: w, zone: "D" };
+      return null;
+    },
+    err: "Entrez le nom de la ville (ex: Rabat, Casablanca, Marrakech).",
+    multi: true,
+  },
+  {
+    key: "surface",
+    ask: () => "Surface couverte totale (m²) ?",
+    resolve(text, ents) {
+      if (ents.surface) return ents.surface;
+      const n = parseFloat(text.replace(/[^\d.]/g, ""));
+      return n > 0 && n < 10000 ? n : null;
+    },
+    err: "Entrez une surface valide en m². Ex : 250",
+  },
+  {
+    key: "floors",
+    ask: () => "Nombre de niveaux ? (ex: RDC = 1, R+1 = 2, R+2 = 3)",
+    resolve(text, ents) {
+      if (ents.floors) return ents.floors;
+      const t = norm(text);
+      if (t === "rdc" || t === "0" || t === "r+0") return 1;
+      const m = text.match(/r\+?\s*(\d)/i);
+      if (m) return parseInt(m[1]) + 1;
+      const n = parseInt(text.replace(/[^\d]/g, ""));
+      return n > 0 && n < 10 ? n : null;
+    },
+    err: "Entrez un nombre de niveaux. Ex : RDC, R+1, R+2",
+  },
+  {
+    key: "basement",
+    ask: () => "Sous-sol prévu ? (Oui / Non)",
+    resolve(text, ents) {
+      if (ents.basement !== undefined) return ents.basement;
+      if (ents._yes) return true;
+      if (ents._no) return false;
+      const t = norm(text);
+      if (/^(oui|o|yes|1)$/.test(t)) return true;
+      if (/^(non|n|no|0)$/.test(t)) return false;
+      return null;
+    },
+    err: "Répondez Oui ou Non.",
+  },
+  {
+    key: "standing",
+    ask: () => "Standing souhaité ?\n1. Économique (3 000 DH/m²)\n2. Moyen (5 500 DH/m²)\n3. Haut Standing (10 000+ DH/m²)",
+    resolve(text, ents) {
+      if (ents.standing) return ents.standing;
+      const t = norm(text);
+      if (t === "1" || /eco/.test(t)) return "economique";
+      if (t === "2" || /moy|stand/.test(t)) return "moyen";
+      if (t === "3" || /haut|lux|prem|standing/.test(t)) return "haut";
+      return null;
+    },
+    err: "Répondez 1 (Éco), 2 (Moyen) ou 3 (Haut Standing).",
+  },
+  {
+    key: "soil",
+    ask: () => "Nature du terrain ?\n1. Normal (meuble, sable)\n2. Rocheux (nécessite terrassement spécial)",
+    resolve(text, ents) {
+      if (ents.soil) return ents.soil;
+      const t = norm(text);
+      if (t === "1" || /norm|meuble|sable/.test(t)) return "normal";
+      if (t === "2" || /roch|dur|roc/.test(t)) return "rocheux";
+      return null;
+    },
+    err: "Répondez 1 (Normal) ou 2 (Rocheux).",
+  },
+  {
+    key: "options",
+    ask: (data) => {
+      const base = "Options complémentaires ? (0 = aucune)\n1. Piscine (+130 000 DH)\n2. Clim gainable (+500 DH/m²)\n3. Domotique (+800 DH/m²)\n\nEx: 1,2 ou 1,3 ou 2,3";
+      if (data.standing === "haut") {
+        return base + "\n💡 Recommandation Haut Standing : piscine + clim gainable + domotique pour une villa premium.";
+      }
+      return base;
+    },
+    resolve(text, ents) {
+      const t = norm(text);
+      
+      const hasDigit = /\b[123]\b/.test(t);
+      const hasPool = t.includes("piscine") || t.includes("1");
+      const hasAc = t.includes("gainable") || t.includes("2");
+      const hasHa = t.includes("domotique") || t.includes("3");
+      
+      if (t === "0" || /aucun|non|rien/.test(t)) {
+        return { pool: false, ac: "none", home_automation: false };
+      }
+      
+      if (!hasDigit && !hasPool && !hasAc && !hasHa) {
+        return null;
+      }
+      
+      return {
+        pool: hasPool,
+        ac: hasAc ? "gainable" : "none",
+        home_automation: hasHa
+      };
+    },
+    multi: true,
+    err: "Répondez 0, 1, 2, 3 ou combinaison (ex: 1,2).",
+  },
+];
+
+const CONTACT_STEPS = [
+  { key: "nom", ask: () => "Pour finaliser, quel est votre nom complet ?" },
+  { key: "telephone", ask: () => "Votre numéro de téléphone ?" },
+  { key: "email", ask: () => "Votre adresse email ?" },
+];
+
+// ── INTERRUPTS COMMERCIAUX ──────────────────────────────────────────────────
+function checkInterrupt(text) {
+  const isQuestion = /[?]|pourquoi|comment|c.est quoi|qu.est.ce|expliqu|défin|peux.tu|pouvez.vous/i.test(text);
+  if (!isQuestion) return null;
+  
+  const interrupts = [
+    { re: /\broche\b|\brocheux\b|\bterrain dur\b/i, ans: "Le terrain rocheux nécessite un terrassement spécial (+25 000 DH forfait) et parfois du minage. Nos équipes sont équipées pour ce type de sol." },
+    { re: /\bpiscine\b/i, ans: "Nos piscines sont construites en béton armé avec revêtement carrelage ou liner. Forfait base : 130 000 DH (8x4m). Options : système de nage à contre-courant, chauffage, hivernage." },
+    { re: /\bgainable\b/i, ans: "La clim gainable est idéale pour les surfaces >150m². Installation dans les faux-plafonds + bouches discrètes. +500 DH/m²." },
+    { re: /\bdomotique\b/i, ans: "Domotique : pilotage éclairage, volets roulants, climatisation, alarme depuis smartphone. Devis sur étude." },
+    { re: /\bgarantie\b|\bdecennale\b/i, ans: "Nous offrons une garantie décennale (10 ans) sur tous nos chantiers, conforme à la loi marocaine. Une tranquillité d'esprit totale." }
+  ];
+  
+  for (const { re, ans } of interrupts) {
+    if (re.test(text)) return ans;
+  }
+  return null;
+}
+
+// ── SESSIONS ─────────────────────────────────────────────────────────────────
 const sessions = {};
 
 function getSession(id) {
-  if (!sessions[id]) {
-    sessions[id] = { lang: 'fr', step: null, data: {}, contact_idx: null, contact_data: {} };
-  }
+  if (!sessions[id]) sessions[id] = { data: {}, step: null, contact_idx: null, contact_data: {} };
   return sessions[id];
 }
 
-const DEVIS_STEPS = ["service", "surface", "budget", "terrain"];
-const CONTACT_STEPS = ["nom", "telephone", "email"];
-
-// ── PROCESS MESSAGE ─────────────────────────────────────────────────────────
-function processMessage(sessionId, raw) {
-  const msg = raw.trim();
-  const sess = getSession(sessionId);
-  
-  // Détection langue au début de la session
-  if (sess.step === null && sess.contact_idx === null) {
-    sess.lang = detectLang(msg);
-  }
-  const l = sess.lang;
-
-  // Changement de langue manuel
-  if (/^français$|^french$|^fr$|^🇫🇷$/i.test(msg)) { 
-    sess.lang = 'fr'; 
-    return { reply: lang.fr.welcome, next_step: "idle", data: {} };
-  }
-  if (/^english$|^anglais$|^en$|^🇬🇧$/i.test(msg)) { 
-    sess.lang = 'en'; 
-    return { reply: lang.en.welcome, next_step: "idle", data: {} };
-  }
-  if (/^عربية$|^arabic$|^ar$|^🇸🇦$/i.test(msg)) { 
-    sess.lang = 'ar'; 
-    return { reply: lang.ar.welcome, next_step: "idle", data: {} };
-  }
-
-  // Salutations
-  if (/^(bonjour|salut|hello|مرحبا|salam|hi|hey)$/i.test(msg) && sess.step === null && sess.contact_idx === null) {
-    return { reply: lang[l].welcome, next_step: "idle", data: {} };
-  }
-
-  // Détection d'intention
-  const intent = detectIntent(msg, l);
-
-  // Phase de collecte des coordonnées
-  if (sess.contact_idx !== null) {
-    const idx = sess.contact_idx;
-    if (idx < CONTACT_STEPS.length) {
-      sess.contact_data[CONTACT_STEPS[idx]] = msg;
-      sess.contact_idx++;
-      if (sess.contact_idx < CONTACT_STEPS.length) {
-        return { reply: lang[l][CONTACT_STEPS[idx]], next_step: "contact", data: sess.data };
+function nextMissingStep(data) {
+  for (const s of STEPS) {
+    if (s.key === "options") {
+      if (data.options === undefined && (data.pool === undefined && data.ac === undefined && data.home_automation === undefined)) {
+        return s;
       }
-      
-      // Fin du formulaire - Sauvegarde du lead
-      const cd = sess.contact_data;
-      const ed = sess.data;
-      saveLeadToFile(cd, ed, "Devis sur étude");
-      
-      const summary = l === 'fr'
-        ? `✅ **Votre demande a bien été enregistrée !**\n\n📋 Client: ${cd.nom}\n📞 Tél: ${cd.telephone}\n✉️ Email: ${cd.email}\n\n🏗️ Service: ${ed.service || 'Non spécifié'}\n📐 Surface: ${ed.surface || '?'} m²\n💰 Budget: ${ed.budget || 'Non spécifié'}\n\n👨‍💼 **Un ingénieur ERPAC vous contacte sous 24h.**\n📞 ${KB.contacts.phone[0]}`
-        : (l === 'ar'
-          ? `✅ **تم تسجيل طلبك بنجاح!**\n\n📋 العميل: ${cd.nom}\n📞 الهاتف: ${cd.telephone}\n✉️ البريد: ${cd.email}\n\n🏗️ الخدمة: ${ed.service || 'غير محدد'}\n📐 المساحة: ${ed.surface || '?'} م²\n💰 الميزانية: ${ed.budget || 'غير محدد'}\n\n👨‍💼 **سيتم التواصل معكم خلال 24 ساعة.**`
-          : `✅ **Your request has been saved!**\n\n📋 Client: ${cd.nom}\n📞 Phone: ${cd.telephone}\n✉️ Email: ${cd.email}\n\n🏗️ Service: ${ed.service || 'Not specified'}\n📐 Area: ${ed.surface || '?'} m²\n💰 Budget: ${ed.budget || 'Not specified'}\n\n👨‍💼 **An ERPAC engineer will contact you within 24 hours.**`);
-      
-      delete sessions[sessionId];
-      return { reply: summary, next_step: "idle", data: {} };
+    } else if (data[s.key] === undefined) {
+      return s;
     }
   }
-
-  // Tunnel de devis
-  if (sess.step !== null) {
-    const stepKey = DEVIS_STEPS[sess.step];
-    if (stepKey === "service") {
-      const detected = detectService(msg, l);
-      sess.data[stepKey] = detected ? (l === 'fr' ? detected.name_fr : (l === 'ar' ? detected.name_ar : detected.name_en)) : msg;
-    } else {
-      sess.data[stepKey] = msg;
-    }
-    sess.step++;
-    
-    if (sess.step < DEVIS_STEPS.length) {
-      return { reply: lang[l][DEVIS_STEPS[sess.step]], next_step: "devis", data: sess.data };
-    }
-    
-    // Fin du devis - passer à la collecte des coordonnées
-    sess.contact_idx = 0;
-    sess.step = null;
-    return { reply: `${lang[l].confirm}\n\n${lang[l].name}`, next_step: "contact", data: sess.data };
-  }
-
-  // Réponses directes aux intentions
-  if (intent === "services") {
-    return { reply: lang[l].services, next_step: "idle", data: {} };
-  }
-  if (intent === "projects") {
-    return { reply: lang[l].projects, next_step: "idle", data: {} };
-  }
-  if (intent === "hours") {
-    return { reply: lang[l].hours, next_step: "idle", data: {} };
-  }
-  if (intent === "contact") {
-    return { reply: lang[l].contact, next_step: "idle", data: {} };
-  }
-  if (intent === "info") {
-    return { reply: lang[l].info, next_step: "idle", data: {} };
-  }
-  if (intent === "devis") {
-    sess.step = 0;
-    sess.data = {};
-    return { reply: lang[l].devis_start, next_step: "devis", data: {} };
-  }
-
-  // Détection automatique d'un service
-  const service = detectService(msg, l);
-  if (service && sess.step === null && sess.contact_idx === null) {
-    const name = l === 'fr' ? service.name_fr : (l === 'ar' ? service.name_ar : service.name_en);
-    return { reply: `📌 **${name}**\n\nSouhaitez-vous un devis ? (Oui/Non)`, next_step: "idle", data: { service: name } };
-  }
-
-  // Réponse Oui/Non après présentation d'un service
-  if (/^(oui|نعم|yes|o|y)$/i.test(msg) && sess.data.service && !sess.step && sess.contact_idx === null) {
-    sess.step = 0;
-    sess.data = { service: sess.data.service };
-    return { reply: lang[l][DEVIS_STEPS[0]], next_step: "devis", data: sess.data };
-  }
-
-  // Réponse par défaut
-  return { reply: lang[l].fallback, next_step: "idle", data: {} };
+  return null;
 }
 
-// ── WHATSAPP SENDER (CORRIGÉ) ───────────────────────────────────────────────
-async function sendWhatsApp(to, text) {
-  if (!WA_TOKEN || !WA_PHONE_ID) {
-    console.log('⚠️ WhatsApp non configuré - variables manquantes');
-    return false;
-  }
-  
-  if (!text || text.trim() === '') {
-    console.log('❌ Tentative d\'envoi d\'un message vide');
-    return false;
-  }
-  
-  try {
-    const response = await fetch(`https://graph.facebook.com/v18.0/${WA_PHONE_ID}/messages`, {
-      method: "POST",
-      headers: { 
-        "Content-Type": "application/json", 
-        "Authorization": `Bearer ${WA_TOKEN}`
-      },
-      body: JSON.stringify({ 
-        messaging_product: "whatsapp", 
-        to: to, 
-        type: "text", 
-        text: { body: text.substring(0, 4096) } // Limite WhatsApp
-      }),
-    });
-    
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error("❌ WA Error:", errorText);
-      return false;
-    }
-    
-    console.log(`✅ Message envoyé à ${to} (${text.length} caractères)`);
-    return true;
-  } catch (e) { 
-    console.error("❌ WhatsApp send error:", e); 
-    return false;
-  }
-}
-
-// ── ROUTES ───────────────────────────────────────────────────────────────────
-
-// Webhook générique (pour test)
-app.post("/webhook", (req, res) => {
-  const { session_id, message } = req.body;
-  if (!session_id || !message) {
-    return res.status(400).json({ error: "session_id and message required" });
-  }
-  const result = processMessage(session_id, message);
-  return res.json(result);
-});
-
-// Webhook WhatsApp Business
-app.get("/webhook/whatsapp", (req, res) => {
-  const mode = req.query["hub.mode"];
-  const token = req.query["hub.verify_token"];
-  const challenge = req.query["hub.challenge"];
-  
-  if (mode === "subscribe" && token === WA_VERIFY_TOKEN) {
-    console.log("✅ Webhook WhatsApp vérifié");
-    return res.status(200).send(challenge);
-  }
-  return res.sendStatus(403);
-});
-
-app.post("/webhook/whatsapp", async (req, res) => {
-  // Répondre immédiatement à WhatsApp
-  res.sendStatus(200);
-  
-  try {
-    const entry = req.body?.entry?.[0];
-    const changes = entry?.changes?.[0];
-    const value = changes?.value;
-    const messages = value?.messages;
-    const message = messages?.[0];
-    
-    if (!message || message.type !== "text") {
-      console.log("⚠️ Message non textuel ou absent");
-      return;
-    }
-    
-    const from = message.from;
-    const text = message.text.body;
-    
-    console.log(`📩 Message reçu de ${from}: ${text.substring(0, 100)}`);
-    
-    const response = processMessage(from, text);
-    
-    if (response && response.reply && response.reply.trim() !== '') {
-      await sendWhatsApp(from, response.reply);
-    } else {
-      console.log("❌ Aucune réponse générée");
-      await sendWhatsApp(from, "Je n'ai pas compris. Tapez : SERVICES, DEVIS, CONTACT, PROJETS");
-    }
-    
-  } catch (error) {
-    console.error("❌ Erreur webhook:", error);
-  }
-});
-
-// Route pour voir les leads sauvegardés
-app.get("/leads", (req, res) => {
-  if (fs.existsSync(LEADS_FILE)) {
-    const leads = JSON.parse(fs.readFileSync(LEADS_FILE, 'utf8'));
-    res.json({ count: leads.length, leads: leads });
-  } else {
-    res.json({ count: 0, leads: [] });
-  }
-});
-
-// Route de test
-app.get("/test", (req, res) => {
-  const testMessage = req.query.q || "Bonjour, je veux construire une villa";
-  const result = processMessage("test_user", testMessage);
-  res.json({ 
-    input: testMessage, 
-    output: result,
-    hasReply: !!(result && result.reply)
-  });
-});
-
-app.get("/health", (req, res) => res.json({ status: "ok", version: "5.0-final", timestamp: new Date().toISOString() }));
-
-// ── DÉMARRAGE ───────────────────────────────────────────────────────────────
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`\n🚀 ERPAC Bot v5.0 démarré sur le port ${PORT}`);
-  console.log(`🌍 Support: Français | العربية | English`);
-  console.log(`📝 Leads sauvegardés dans: ${LEADS_FILE}`);
-  console.log(`🔗 Webhook WhatsApp: /webhook/whatsapp`);
-  console.log(`📊 Voir les leads: /leads\n`);
-});
+// ── STATIC REPLIES ENRICHIES ─────────────────────────────────────────────────
+const STATIC = {
+  services: () => `🏗️ **SERVICES ERPAC**\n\n${KB.services}\n\n${KB.engagements}`,
+  contact: () => `📞 **CONTACT ERPAC**\n\nTél: ${KB.phones.join(" / ")}\n✉️ Email: ${KB.email}\n📍 Adresse: ${KB.location}\n\n⏰ Disponible 7j/7 sur WhatsApp.`,
+  projets: () => `🏆 **RÉALISATIONS ERPAC**\n\n${KB.projets}\n\nPlus de détails sur nos villas de luxe et projets industriels sur demande.`,
+  info: () => `🏢 **QUI SOMMES-NOUS ?**\n\n${KB.presentation}\n\n${KB.engagements}\n\n${KB.projets}`
