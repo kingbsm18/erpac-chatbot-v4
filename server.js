@@ -14,7 +14,7 @@ const WA_TOKEN = process.env.WA_TOKEN;
 const WA_PHONE_ID = process.env.WA_PHONE_ID;
 const WA_VERIFY_TOKEN = process.env.WA_VERIFY_TOKEN || "erpac_verify";
 
-// ── LEADS STOCKAGE LOCAL (temporaire) ───────────────────────────────────────
+// ── LEADS STOCKAGE LOCAL ─────────────────────────────────────────────────────
 const fs = require('fs');
 const path = require('path');
 const LEADS_FILE = path.join(__dirname, 'leads.json');
@@ -94,7 +94,11 @@ const lang = {
     name: "👤 Votre nom complet ?",
     phone: "📞 Votre numéro de téléphone ?",
     email: "✉️ Votre adresse email ?",
-    confirm: "✅ Votre demande a bien été enregistrée !"
+    projects: "🏆 **NOS RÉALISATIONS**\n\n• Villas de luxe: Rabat, Casablanca, Marrakech\n• Clinique d'Agdal\n• Hangars à Mohammedia\n• Restaurants à Marrakech\n\n📸 Visitez www.erpac.ma pour voir la galerie complète.",
+    hours: `⏰ **Horaires ERPAC**\n${KB.company.hours}`,
+    info: `🏢 **ERPAC SARL**\n\nCréation: 2020\nCEO: Mustapha ESSARHANI\nProjets: 456+\nClients: 513+\nExpérience: 10+ ans\nValeurs: Excellence, Confiance, Ambition, Convivialité, Proximité`,
+    confirm: "✅ Votre demande a bien été enregistrée !",
+    fallback: "Je n'ai pas compris. Tapez : SERVICES, DEVIS, CONTACT, PROJETS, HORAIRES ou INFO"
   },
   ar: {
     welcome: "مرحباً! أنا المساعد الافتراضي لشركة إيرباك.\n\n🇫🇷 Français | 🇬🇧 English | 🇸🇦 العربية\n\nاكتب:\n• SERVICES\n• DEVIS\n• CONTACT\n• PROJETS\n• HORAIRES",
@@ -107,7 +111,11 @@ const lang = {
     name: "👤 الاسم الكامل؟",
     phone: "📞 رقم الهاتف؟",
     email: "✉️ البريد الإلكتروني؟",
-    confirm: "✅ تم تسجيل طلبك بنجاح!"
+    projects: "🏆 **مشاريعنا**\n\n• فلل فاخرة: الرباط، الدار البيضاء، مراكش\n• عيادة أكدال\n• مستودعات في المحمدية\n• مطاعم في مراكش\n\n📸 تفضل بزيارة موقعنا للمعرض الكامل: www.erpac.ma",
+    hours: `⏰ **مواعيد إيرباك**\n${KB.company.hours}`,
+    info: `🏢 **إيرباك**\n\nالتأسيس: 2020\nالمدير: مصطفى الصحراني\nالمشاريع: 456+\nالعملاء: 513+\nالخبرة: 10+ سنوات`,
+    confirm: "✅ تم تسجيل طلبك بنجاح!",
+    fallback: "لم أفهم. اكتب: SERVICES, DEVIS, CONTACT, PROJETS, HORAIRES"
   },
   en: {
     welcome: "Hello! I'm ERPAC's virtual assistant.\n\n🇫🇷 Français | 🇬🇧 English | 🇸🇦 العربية\n\nType:\n• SERVICES\n• QUOTE\n• CONTACT\n• PROJECTS\n• HOURS",
@@ -120,7 +128,11 @@ const lang = {
     name: "👤 Your full name?",
     phone: "📞 Your phone number?",
     email: "✉️ Your email address?",
-    confirm: "✅ Your request has been saved!"
+    projects: "🏆 **OUR PROJECTS**\n\n• Luxury villas: Rabat, Casablanca, Marrakech\n• Agdal Clinic\n• Warehouses in Mohammedia\n• Restaurants in Marrakech\n\n📸 Visit www.erpac.ma for the full gallery.",
+    hours: `⏰ **ERPAC Hours**\n${KB.company.hours}`,
+    info: `🏢 **ERPAC SARL**\n\nFounded: 2020\nCEO: Mustapha ESSARHANI\nProjects: 456+\nClients: 513+\nExperience: 10+ years`,
+    confirm: "✅ Your request has been saved!",
+    fallback: "I didn't understand. Type: SERVICES, QUOTE, CONTACT, PROJECTS, HOURS"
   }
 };
 
@@ -138,8 +150,9 @@ function detectService(text, l) {
     const names = [s.name_fr.toLowerCase(), s.name_ar.toLowerCase(), s.name_en.toLowerCase()];
     if (names.some(n => t.includes(n))) return s;
   }
-  if (/\b[1-9]|10|11\b/.test(t)) {
-    const num = parseInt(t.match(/\b([1-9]|10|11)\b/)[0]);
+  const numMatch = t.match(/\b([1-9]|10|11)\b/);
+  if (numMatch) {
+    const num = parseInt(numMatch[1]);
     return KB.services.find(s => s.id === num);
   }
   return null;
@@ -169,62 +182,50 @@ function getSession(id) {
 const DEVIS_STEPS = ["service", "surface", "budget", "terrain"];
 const CONTACT_STEPS = ["nom", "telephone", "email"];
 
-// ── RÉPONSES ────────────────────────────────────────────────────────────────
-function getProjectsReply(l) {
-  const projects = {
-    fr: "🏆 **NOS RÉALISATIONS**\n\n• Villas de luxe: Rabat, Casablanca, Marrakech\n• Clinique d'Agdal\n• Hangars à Mohammedia\n• Restaurants à Marrakech",
-    ar: "🏆 **مشاريعنا**\n\n• فلل فاخرة: الرباط، الدار البيضاء، مراكش\n• عيادة أكدال\n• مستودعات في المحمدية\n• مطاعم في مراكش",
-    en: "🏆 **OUR PROJECTS**\n\n• Luxury villas: Rabat, Casablanca, Marrakech\n• Agdal Clinic\n• Warehouses in Mohammedia\n• Restaurants in Marrakech"
-  };
-  return projects[l];
-}
-
-function getHoursReply(l) {
-  return l === 'fr' ? `⏰ **Horaires:** ${KB.company.hours}` : (l === 'ar' ? `⏰ **المواعيد:** ${KB.company.hours}` : `⏰ **Hours:** ${KB.company.hours}`);
-}
-
-function getCompanyInfo(l) {
-  if (l === 'fr') {
-    return `🏢 **ERPAC SARL**\n\nCréation: 2020\nCEO: Mustapha ESSARHANI\nProjets: 456+\nClients: 513+\nExpérience: 10+ ans\nValeurs: Excellence, Confiance, Ambition, Convivialité, Proximité`;
-  } else if (l === 'ar') {
-    return `🏢 **إيرباك**\n\nالتأسيس: 2020\nالمدير: مصطفى الصحراني\nالمشاريع: 456+\nالعملاء: 513+\nالخبرة: 10+ سنوات`;
-  } else {
-    return `🏢 **ERPAC SARL**\n\nFounded: 2020\nCEO: Mustapha ESSARHANI\nProjects: 456+\nClients: 513+\nExperience: 10+ years`;
-  }
-}
-
-// ── PROCESS ─────────────────────────────────────────────────────────────────
+// ── PROCESS MESSAGE ─────────────────────────────────────────────────────────
 function processMessage(sessionId, raw) {
   const msg = raw.trim();
   const sess = getSession(sessionId);
   
+  // Détection langue au début de la session
   if (sess.step === null && sess.contact_idx === null) {
     sess.lang = detectLang(msg);
   }
   const l = sess.lang;
 
-  // Changement langue
-  if (/français|french|fr|🇫🇷/i.test(msg) && msg.length < 15) { sess.lang = 'fr'; return reply(lang.fr.welcome, "idle", {}); }
-  if (/english|anglais|en|🇬🇧/i.test(msg) && msg.length < 15) { sess.lang = 'en'; return reply(lang.en.welcome, "idle", {}); }
-  if (/عربية|arabic|ar|🇸🇦/i.test(msg) && msg.length < 15) { sess.lang = 'ar'; return reply(lang.ar.welcome, "idle", {}); }
-
-  // Intent
-  const intent = detectIntent(msg, l);
-  
-  if (/bonjour|salut|hello|مرحبا|salam/i.test(msg) && !sess.step && !sess.contact_idx) {
-    return reply(lang[l].welcome, "idle", {});
+  // Changement de langue manuel
+  if (/^français$|^french$|^fr$|^🇫🇷$/i.test(msg)) { 
+    sess.lang = 'fr'; 
+    return { reply: lang.fr.welcome, next_step: "idle", data: {} };
+  }
+  if (/^english$|^anglais$|^en$|^🇬🇧$/i.test(msg)) { 
+    sess.lang = 'en'; 
+    return { reply: lang.en.welcome, next_step: "idle", data: {} };
+  }
+  if (/^عربية$|^arabic$|^ar$|^🇸🇦$/i.test(msg)) { 
+    sess.lang = 'ar'; 
+    return { reply: lang.ar.welcome, next_step: "idle", data: {} };
   }
 
-  // Phase contact
+  // Salutations
+  if (/^(bonjour|salut|hello|مرحبا|salam|hi|hey)$/i.test(msg) && sess.step === null && sess.contact_idx === null) {
+    return { reply: lang[l].welcome, next_step: "idle", data: {} };
+  }
+
+  // Détection d'intention
+  const intent = detectIntent(msg, l);
+
+  // Phase de collecte des coordonnées
   if (sess.contact_idx !== null) {
     const idx = sess.contact_idx;
     if (idx < CONTACT_STEPS.length) {
       sess.contact_data[CONTACT_STEPS[idx]] = msg;
       sess.contact_idx++;
       if (sess.contact_idx < CONTACT_STEPS.length) {
-        return reply(lang[l][CONTACT_STEPS[idx]], "contact", sess.data);
+        return { reply: lang[l][CONTACT_STEPS[idx]], next_step: "contact", data: sess.data };
       }
       
+      // Fin du formulaire - Sauvegarde du lead
       const cd = sess.contact_data;
       const ed = sess.data;
       saveLeadToFile(cd, ed, "Devis sur étude");
@@ -236,11 +237,11 @@ function processMessage(sessionId, raw) {
           : `✅ **Your request has been saved!**\n\n📋 Client: ${cd.nom}\n📞 Phone: ${cd.telephone}\n✉️ Email: ${cd.email}\n\n🏗️ Service: ${ed.service || 'Not specified'}\n📐 Area: ${ed.surface || '?'} m²\n💰 Budget: ${ed.budget || 'Not specified'}\n\n👨‍💼 **An ERPAC engineer will contact you within 24 hours.**`);
       
       delete sessions[sessionId];
-      return reply(summary, "idle", {});
+      return { reply: summary, next_step: "idle", data: {} };
     }
   }
 
-  // Tunnel devis
+  // Tunnel de devis
   if (sess.step !== null) {
     const stepKey = DEVIS_STEPS[sess.step];
     if (stepKey === "service") {
@@ -252,94 +253,185 @@ function processMessage(sessionId, raw) {
     sess.step++;
     
     if (sess.step < DEVIS_STEPS.length) {
-      return reply(lang[l][DEVIS_STEPS[sess.step]], "devis", sess.data);
+      return { reply: lang[l][DEVIS_STEPS[sess.step]], next_step: "devis", data: sess.data };
     }
     
+    // Fin du devis - passer à la collecte des coordonnées
     sess.contact_idx = 0;
     sess.step = null;
-    return reply(`${lang[l].confirm}\n\n${lang[l].name}`, "contact", sess.data);
+    return { reply: `${lang[l].confirm}\n\n${lang[l].name}`, next_step: "contact", data: sess.data };
   }
 
-  // Réponses directes
-  if (intent === "services") return reply(lang[l].services, "idle", {});
-  if (intent === "projects") return reply(getProjectsReply(l), "idle", {});
-  if (intent === "hours") return reply(getHoursReply(l), "idle", {});
-  if (intent === "contact") return reply(lang[l].contact, "idle", {});
-  if (intent === "info") return reply(getCompanyInfo(l), "idle", {});
+  // Réponses directes aux intentions
+  if (intent === "services") {
+    return { reply: lang[l].services, next_step: "idle", data: {} };
+  }
+  if (intent === "projects") {
+    return { reply: lang[l].projects, next_step: "idle", data: {} };
+  }
+  if (intent === "hours") {
+    return { reply: lang[l].hours, next_step: "idle", data: {} };
+  }
+  if (intent === "contact") {
+    return { reply: lang[l].contact, next_step: "idle", data: {} };
+  }
+  if (intent === "info") {
+    return { reply: lang[l].info, next_step: "idle", data: {} };
+  }
   if (intent === "devis") {
     sess.step = 0;
     sess.data = {};
-    return reply(lang[l].devis_start, "devis", {});
+    return { reply: lang[l].devis_start, next_step: "devis", data: {} };
   }
 
-  // Détection auto service
+  // Détection automatique d'un service
   const service = detectService(msg, l);
-  if (service && !sess.step) {
+  if (service && sess.step === null && sess.contact_idx === null) {
     const name = l === 'fr' ? service.name_fr : (l === 'ar' ? service.name_ar : service.name_en);
-    return reply(`📌 **${name}**\n\nSouhaitez-vous un devis ? (Oui/Non)`, "idle", { service: name });
+    return { reply: `📌 **${name}**\n\nSouhaitez-vous un devis ? (Oui/Non)`, next_step: "idle", data: { service: name } };
   }
 
-  if (/oui|نعم|yes|o|y/.test(msg) && sess.data.service && !sess.step) {
+  // Réponse Oui/Non après présentation d'un service
+  if (/^(oui|نعم|yes|o|y)$/i.test(msg) && sess.data.service && !sess.step && sess.contact_idx === null) {
     sess.step = 0;
     sess.data = { service: sess.data.service };
-    return reply(lang[l][DEVIS_STEPS[0]], "devis", sess.data);
+    return { reply: lang[l][DEVIS_STEPS[0]], next_step: "devis", data: sess.data };
   }
 
-  return reply(lang[l].welcome, "idle", {});
+  // Réponse par défaut
+  return { reply: lang[l].fallback, next_step: "idle", data: {} };
 }
 
-function reply(text, next_step, data) {
-  return { reply: text, next_step, data };
-}
-
-// ── WHATSAPP ─────────────────────────────────────────────────────────────────
+// ── WHATSAPP SENDER (CORRIGÉ) ───────────────────────────────────────────────
 async function sendWhatsApp(to, text) {
-  if (!WA_TOKEN || !WA_PHONE_ID) return;
+  if (!WA_TOKEN || !WA_PHONE_ID) {
+    console.log('⚠️ WhatsApp non configuré - variables manquantes');
+    return false;
+  }
+  
+  if (!text || text.trim() === '') {
+    console.log('❌ Tentative d\'envoi d\'un message vide');
+    return false;
+  }
+  
   try {
-    const r = await fetch(`https://graph.facebook.com/v18.0/${WA_PHONE_ID}/messages`, {
+    const response = await fetch(`https://graph.facebook.com/v18.0/${WA_PHONE_ID}/messages`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${WA_TOKEN}` },
-      body: JSON.stringify({ messaging_product: "whatsapp", to, type: "text", text: { body: text } }),
+      headers: { 
+        "Content-Type": "application/json", 
+        "Authorization": `Bearer ${WA_TOKEN}`
+      },
+      body: JSON.stringify({ 
+        messaging_product: "whatsapp", 
+        to: to, 
+        type: "text", 
+        text: { body: text.substring(0, 4096) } // Limite WhatsApp
+      }),
     });
-    if (!r.ok) console.error("WA Error:", await r.text());
-  } catch (e) { console.error("WhatsApp error:", e); }
+    
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error("❌ WA Error:", errorText);
+      return false;
+    }
+    
+    console.log(`✅ Message envoyé à ${to} (${text.length} caractères)`);
+    return true;
+  } catch (e) { 
+    console.error("❌ WhatsApp send error:", e); 
+    return false;
+  }
 }
 
 // ── ROUTES ───────────────────────────────────────────────────────────────────
+
+// Webhook générique (pour test)
 app.post("/webhook", (req, res) => {
   const { session_id, message } = req.body;
-  if (!session_id || !message) return res.status(400).json({ error: "session_id and message required" });
-  return res.json(processMessage(session_id, message));
+  if (!session_id || !message) {
+    return res.status(400).json({ error: "session_id and message required" });
+  }
+  const result = processMessage(session_id, message);
+  return res.json(result);
 });
 
+// Webhook WhatsApp Business
 app.get("/webhook/whatsapp", (req, res) => {
-  const { "hub.mode": mode, "hub.verify_token": token, "hub.challenge": challenge } = req.query;
-  if (mode === "subscribe" && token === WA_VERIFY_TOKEN) return res.status(200).send(challenge);
+  const mode = req.query["hub.mode"];
+  const token = req.query["hub.verify_token"];
+  const challenge = req.query["hub.challenge"];
+  
+  if (mode === "subscribe" && token === WA_VERIFY_TOKEN) {
+    console.log("✅ Webhook WhatsApp vérifié");
+    return res.status(200).send(challenge);
+  }
   return res.sendStatus(403);
 });
 
 app.post("/webhook/whatsapp", async (req, res) => {
+  // Répondre immédiatement à WhatsApp
   res.sendStatus(200);
+  
   try {
-    const msg = req.body?.entry?.[0]?.changes?.[0]?.value?.messages?.[0];
-    if (!msg || msg.type !== "text") return;
-    const { reply } = processMessage(msg.from, msg.text.body);
-    await sendWhatsApp(msg.from, reply);
-  } catch (e) { console.error("Webhook error:", e); }
-});
-
-app.get("/health", (_, res) => res.json({ status: "ok", version: "5.0-final" }));
-app.get("/leads", (_, res) => {
-  if (fs.existsSync(LEADS_FILE)) {
-    res.json(JSON.parse(fs.readFileSync(LEADS_FILE, 'utf8')));
-  } else {
-    res.json([]);
+    const entry = req.body?.entry?.[0];
+    const changes = entry?.changes?.[0];
+    const value = changes?.value;
+    const messages = value?.messages;
+    const message = messages?.[0];
+    
+    if (!message || message.type !== "text") {
+      console.log("⚠️ Message non textuel ou absent");
+      return;
+    }
+    
+    const from = message.from;
+    const text = message.text.body;
+    
+    console.log(`📩 Message reçu de ${from}: ${text.substring(0, 100)}`);
+    
+    const response = processMessage(from, text);
+    
+    if (response && response.reply && response.reply.trim() !== '') {
+      await sendWhatsApp(from, response.reply);
+    } else {
+      console.log("❌ Aucune réponse générée");
+      await sendWhatsApp(from, "Je n'ai pas compris. Tapez : SERVICES, DEVIS, CONTACT, PROJETS");
+    }
+    
+  } catch (error) {
+    console.error("❌ Erreur webhook:", error);
   }
 });
 
+// Route pour voir les leads sauvegardés
+app.get("/leads", (req, res) => {
+  if (fs.existsSync(LEADS_FILE)) {
+    const leads = JSON.parse(fs.readFileSync(LEADS_FILE, 'utf8'));
+    res.json({ count: leads.length, leads: leads });
+  } else {
+    res.json({ count: 0, leads: [] });
+  }
+});
+
+// Route de test
+app.get("/test", (req, res) => {
+  const testMessage = req.query.q || "Bonjour, je veux construire une villa";
+  const result = processMessage("test_user", testMessage);
+  res.json({ 
+    input: testMessage, 
+    output: result,
+    hasReply: !!(result && result.reply)
+  });
+});
+
+app.get("/health", (req, res) => res.json({ status: "ok", version: "5.0-final", timestamp: new Date().toISOString() }));
+
+// ── DÉMARRAGE ───────────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`🌍 ERPAC Bot v5.0 sur le port ${PORT}`);
-  console.log(`   Support: Français | العربية | English`);
-  console.log(`   📝 Leads sauvegardés dans leads.json`);
+  console.log(`\n🚀 ERPAC Bot v5.0 démarré sur le port ${PORT}`);
+  console.log(`🌍 Support: Français | العربية | English`);
+  console.log(`📝 Leads sauvegardés dans: ${LEADS_FILE}`);
+  console.log(`🔗 Webhook WhatsApp: /webhook/whatsapp`);
+  console.log(`📊 Voir les leads: /leads\n`);
 });
