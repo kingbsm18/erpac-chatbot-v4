@@ -1,5 +1,5 @@
 const express = require("express");
-const nodemailer = require("nodemailer");
+const { google } = require("googleapis");
 const fs = require('fs');
 const path = require('path');
 const app = express();
@@ -17,23 +17,108 @@ const WA_TOKEN = process.env.WA_TOKEN;
 const WA_PHONE_ID = process.env.WA_PHONE_ID;
 const WA_VERIFY_TOKEN = process.env.WA_VERIFY_TOKEN || "erpac_verify";
 
-// ── CONFIGURATION EMAIL (Alertes dirigeant) ─────────────────────────────────
-const EMAIL_FOUNDER = process.env.EMAIL_FOUNDER || "adam@erpac.ma";
-const EMAIL_USER = process.env.EMAIL_USER;
-const EMAIL_PASS = process.env.EMAIL_PASS;
+// ── CONFIGURATION GOOGLE SHEETS ─────────────────────────────────────────────
+const SPREADSHEET_ID = process.env.SPREADSHEET_ID || "1XiLalbZsdD34IXsyZ3VcgX2kYgeHk5LOmOKfbNz1y5I";
+const GOOGLE_CLIENT_EMAIL = process.env.GOOGLE_CLIENT_EMAIL;
+const GOOGLE_PRIVATE_KEY = process.env.GOOGLE_PRIVATE_KEY;
 
-let transporter = null;
-if (EMAIL_USER && EMAIL_PASS) {
-  transporter = nodemailer.createTransport({
-    service: 'gmail',
-    auth: { user: EMAIL_USER, pass: EMAIL_PASS }
-  });
-  console.log("✅ Email alert system configured");
-} else {
-  console.warn("⚠️ Email credentials missing - alerts disabled");
+let sheets = null;
+
+async function initGoogleSheets() {
+  if (!SPREADSHEET_ID || !GOOGLE_CLIENT_EMAIL || !GOOGLE_PRIVATE_KEY) {
+    console.log('⚠️ Google Sheets non configuré - variables manquantes');
+    console.log('   Ajouter: SPREADSHEET_ID, GOOGLE_CLIENT_EMAIL, GOOGLE_PRIVATE_KEY');
+    return false;
+  }
+  
+  try {
+    const privateKey = GOOGLE_PRIVATE_KEY.replace(/\\n/g, '\n');
+    
+    const auth = new google.auth.JWT(
+      GOOGLE_CLIENT_EMAIL,
+      null,
+      privateKey,
+      ['https://www.googleapis.com/auth/spreadsheets']
+    );
+    
+    sheets = google.sheets({ version: 'v4', auth });
+    
+    await sheets.spreadsheets.get({ spreadsheetId: SPREADSHEET_ID });
+    console.log('✅ Google Sheets connecté avec succès');
+    return true;
+  } catch (error) {
+    console.error('❌ Erreur connexion Sheets:', error.message);
+    return false;
+  }
 }
 
-// ── STOCKAGE LOCAL DES LEADS ────────────────────────────────────────────────
+async function addLeadToSheet(clientData, estimateData, ttcValue) {
+  if (!sheets) {
+    console.log('⚠️ Google Sheets non disponible - sauvegarde locale uniquement');
+    return false;
+  }
+  
+  const now = new Date().toLocaleString('fr-MA', { timeZone: 'Africa/Casablanca' });
+  
+  const values = [[
+    now,
+    clientData.nom || '',
+    clientData.telephone || '',
+    clientData.email || '',
+    estimateData.project_type || '',
+    estimateData.city || '',
+    estimateData.surface || '',
+    estimateData.floors || 1,
+    estimateData.standing || 'Moyen',
+    estimateData.basement ? 'Oui' : 'Non',
+    estimateData.soil === 'rocheux' ? 'Rocheux (+25k DH)' : 'Normal',
+    estimateData.pool ? 'Oui (+130k DH)' : 'Non',
+    estimateData.ac === 'gainable' ? 'Oui (+500 DH/m²)' : 'Non',
+    estimateData.home_automation ? 'Oui (+800 DH/m²)' : 'Non',
+    ttcValue,
+    `https://wa.me/${clientData.telephone.replace(/[^0-9]/g, '')}`,
+    'Nouveau - À contacter'
+  ]];
+  
+  try {
+    try {
+      await sheets.spreadsheets.values.get({
+        spreadsheetId: SPREADSHEET_ID,
+        range: 'Feuil1!A1:Q1',
+      });
+    } catch {
+      const headers = [[
+        'Date/Heure', 'Nom Client', 'Téléphone', 'Email',
+        'Type Projet', 'Ville', 'Surface (m²)', 'Niveaux',
+        'Standing', 'Sous-sol', 'Terrain', 'Piscine',
+        'Clim Gainable', 'Domotique', 'Montant TTC', 'Lien WhatsApp', 'Statut'
+      ]];
+      await sheets.spreadsheets.values.update({
+        spreadsheetId: SPREADSHEET_ID,
+        range: 'Feuil1!A1:Q1',
+        valueInputOption: 'USER_ENTERED',
+        resource: { values: headers },
+      });
+      console.log('✅ En-tête créé dans Google Sheets');
+    }
+    
+    await sheets.spreadsheets.values.append({
+      spreadsheetId: SPREADSHEET_ID,
+      range: 'Feuil1!A:Q',
+      valueInputOption: 'USER_ENTERED',
+      insertDataOption: 'INSERT_ROWS',
+      resource: { values },
+    });
+    
+    console.log(`✅ Lead ajouté à Google Sheets: ${clientData.nom}`);
+    return true;
+  } catch (error) {
+    console.error('❌ Erreur ajout lead Sheets:', error.message);
+    return false;
+  }
+}
+
+// ── STOCKAGE LOCAL DES LEADS (fallback) ─────────────────────────────────────
 const LEADS_FILE = path.join(__dirname, 'leads.json');
 
 function saveLeadToFile(clientData, estimateData, ttcValue) {
@@ -67,6 +152,11 @@ function saveLeadToFile(clientData, estimateData, ttcValue) {
   fs.writeFileSync(LEADS_FILE, JSON.stringify(leads, null, 2));
   console.log(`✅ Lead sauvegardé localement: ${clientData.nom}`);
   return true;
+}
+
+async function sendLeadNotification(clientData, estimateData, ttcValue) {
+  saveLeadToFile(clientData, estimateData, ttcValue);
+  await addLeadToSheet(clientData, estimateData, ttcValue);
 }
 
 // ── KB ENRICHIE ─────────────────────────────────────────────────────────────
@@ -208,42 +298,6 @@ function renderEstimate(d) {
     `⚠️  Indicatif – fer & ciment volatils 2026.`,
     `📞 ${KB.phones[0]}  ✉️ ${KB.email}`,
   ].join("\n");
-}
-
-// ── ALERTE DIRIGEANT ────────────────────────────────────────────────────────
-async function sendLeadToFounder(clientData, estimateData, ttcValue) {
-  saveLeadToFile(clientData, estimateData, ttcValue);
-  
-  if (!transporter) {
-    console.log("Email alerts disabled");
-    return;
-  }
-
-  const mailOptions = {
-    from: `"ERPAC Bot" <${EMAIL_USER}>`,
-    to: EMAIL_FOUNDER,
-    subject: `🚨 NOUVEAU LEAD DEVIS - ${clientData.nom}`,
-    html: `
-      <h2>Nouveau Devis ERPAC</h2>
-      <p><strong>Client:</strong> ${clientData.nom}</p>
-      <p><strong>Téléphone:</strong> ${clientData.telephone}</p>
-      <p><strong>Email:</strong> ${clientData.email}</p>
-      <hr>
-      <p><strong>Projet:</strong> ${estimateData.project_type || 'Non spécifié'}</p>
-      <p><strong>Ville:</strong> ${estimateData.city || 'Non spécifiée'}</p>
-      <p><strong>Surface:</strong> ${estimateData.surface || '?'} m²</p>
-      <p><strong>Montant estimé:</strong> ${ttcValue}</p>
-      <hr>
-      <a href="https://wa.me/${clientData.telephone.replace(/[^0-9]/g, '')}">Contacter sur WhatsApp</a>
-    `
-  };
-
-  try {
-    await transporter.sendMail(mailOptions);
-    console.log(`✅ Email envoyé à ${EMAIL_FOUNDER}`);
-  } catch (error) {
-    console.error("❌ Email error:", error.message);
-  }
 }
 
 // ── STATE MACHINE ────────────────────────────────────────────────────────────
@@ -409,7 +463,8 @@ function processMessage(sessionId, raw) {
       const estimateResult = calculate_estimate(fullEstimate);
       const ttcValue = fmt(estimateResult.ttc);
 
-      sendLeadToFounder(cd, ed, ttcValue);
+      // Envoi vers Google Sheets + fichier local
+      sendLeadNotification(cd, ed, ttcValue);
 
       const summary = `✅ DEMANDE ENREGISTRÉE\n\n📋 Client: ${cd.nom}\n📞 Tél: ${cd.telephone}\n✉️ Email: ${cd.email}\n\n🏗️ Projet: ${ed.project_type || '?'}\n💰 Montant: ${ttcValue}\n\n👨‍💼 Un conseiller vous contacte sous 24h.`;
 
@@ -543,11 +598,14 @@ app.get("/leads", (req, res) => {
   }
 });
 
-app.get("/health", (req, res) => res.json({ status: "ok", version: "5.0-final" }));
+app.get("/health", (req, res) => res.json({ status: "ok", version: "5.0-google-sheets" }));
 
+// ── DÉMARRAGE ───────────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`\n🚀 ERPAC Bot v5.0 démarré sur le port ${PORT}`);
+app.listen(PORT, async () => {
+  console.log(`\n🚀 ERPAC Bot v5.0 (Google Sheets) démarré sur le port ${PORT}`);
+  await initGoogleSheets();
   console.log(`📝 Leads sauvegardés dans: ${LEADS_FILE}`);
-  console.log(`🔗 Webhook: /webhook/whatsapp`);
+  console.log(`🔗 Webhook WhatsApp: /webhook/whatsapp`);
+  console.log(`📊 Voir les leads: /leads\n`);
 });
