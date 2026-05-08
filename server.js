@@ -18,7 +18,7 @@ const WA_PHONE_ID = process.env.WA_PHONE_ID;
 const WA_VERIFY_TOKEN = process.env.WA_VERIFY_TOKEN || "erpac_verify";
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  GOOGLE SHEETS & LOCAL STORAGE (identique à la version riche)
+//  GOOGLE SHEETS & LOCAL STORAGE
 // ─────────────────────────────────────────────────────────────────────────────
 const SPREADSHEET_ID = process.env.SPREADSHEET_ID || "1XiLalbZsdD34IXsyZ3VcgX2kYgeHk5LOmOKfbNz1y5I";
 const GOOGLE_CLIENT_EMAIL = process.env.GOOGLE_CLIENT_EMAIL;
@@ -51,6 +51,7 @@ async function initGoogleSheets() {
 async function addLeadToSheet(clientData, projectData, total) {
   if (!sheets) return false;
   const now = new Date().toLocaleString("fr-MA", { timeZone: "Africa/Casablanca" });
+  const score = estimateLeadScore(clientData, projectData, total);
   const values = [[
     now,
     clientData.nom || "",
@@ -67,33 +68,34 @@ async function addLeadToSheet(clientData, projectData, total) {
     projectData.ac || "",
     projectData.home_automation || "",
     total,
-    `https://wa.me/${clientData.telephone.replace(/[^0-9]/g, "")}`,
-    "Nouveau"
+    clientData.telephone ? `https://wa.me/${String(clientData.telephone).replace(/[^0-9]/g, "")}` : "",
+    "Nouveau",
+    score.label
   ]];
   try {
     try {
-      await sheets.spreadsheets.values.get({ spreadsheetId: SPREADSHEET_ID, range: "Feuil1!A1:Q1" });
+      await sheets.spreadsheets.values.get({ spreadsheetId: SPREADSHEET_ID, range: "Feuil1!A1:R1" });
     } catch {
       const headers = [[
         "Date/Heure", "Nom Client", "Téléphone", "Email", "Type Projet", "Ville",
         "Surface (m²)", "Niveaux", "Standing", "Sous-sol", "Terrain", "Piscine",
-        "Clim Gainable", "Domotique", "Montant TTC", "Lien WhatsApp", "Statut"
+        "Clim Gainable", "Domotique", "Montant TTC", "Lien WhatsApp", "Statut", "Score Lead"
       ]];
       await sheets.spreadsheets.values.update({
         spreadsheetId: SPREADSHEET_ID,
-        range: "Feuil1!A1:Q1",
+        range: "Feuil1!A1:R1",
         valueInputOption: "USER_ENTERED",
         resource: { values: headers },
       });
     }
     await sheets.spreadsheets.values.append({
       spreadsheetId: SPREADSHEET_ID,
-      range: "Feuil1!A:Q",
+      range: "Feuil1!A:R",
       valueInputOption: "USER_ENTERED",
       insertDataOption: "INSERT_ROWS",
       resource: { values },
     });
-    console.log(`✅ Lead ajouté Sheets: ${clientData.nom}`);
+    console.log(`✅ Lead ajouté Sheets: ${clientData.nom} [Score: ${score.label}]`);
     return true;
   } catch (error) {
     console.error("❌ Erreur ajout lead Sheets:", error.message);
@@ -103,6 +105,7 @@ async function addLeadToSheet(clientData, projectData, total) {
 
 const LEADS_FILE = path.join(__dirname, "leads.json");
 function saveLeadToFile(clientData, projectData, total) {
+  const score = estimateLeadScore(clientData, projectData, total);
   const lead = {
     timestamp: new Date().toISOString(),
     date_fr: new Date().toLocaleString("fr-MA", { timeZone: "Africa/Casablanca" }),
@@ -110,6 +113,7 @@ function saveLeadToFile(clientData, projectData, total) {
     project: projectData,
     amount: total,
     status: "Nouveau",
+    lead_score: score,
   };
   let leads = [];
   if (fs.existsSync(LEADS_FILE)) {
@@ -117,7 +121,7 @@ function saveLeadToFile(clientData, projectData, total) {
   }
   leads.push(lead);
   fs.writeFileSync(LEADS_FILE, JSON.stringify(leads, null, 2));
-  console.log(`✅ Lead sauvegardé localement: ${clientData.nom}`);
+  console.log(`✅ Lead sauvegardé localement: ${clientData.nom} [Score: ${score.label}]`);
 }
 
 async function notifyLead(clientData, projectData, total) {
@@ -126,63 +130,90 @@ async function notifyLead(clientData, projectData, total) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  PRICING (exactement du fichier prix construction chatbot.txt)
+//  LEAD QUALITY SCORING
+// ─────────────────────────────────────────────────────────────────────────────
+function estimateLeadScore(clientData, projectData, total) {
+  let score = 0;
+  const nom = clientData.nom || "";
+  const tel = clientData.telephone || "";
+  const email = clientData.email || "";
+
+  // Completeness
+  if (nom.trim().length > 2) score += 20;
+  if (/^(\+212|0)[0-9]{9,}$/.test(tel.replace(/[\s\-]/g, ""))) score += 25;
+  if (email && email !== "non fourni" && /@/.test(email)) score += 10;
+  if (projectData.city) score += 10;
+  if (projectData.surface) score += 10;
+  if (projectData.type) score += 10;
+
+  // Budget quality
+  const amt = parseFloat(String(total).replace(/[^0-9.]/g, "")) || 0;
+  if (amt > 500000) score += 10;
+  if (amt > 1000000) score += 5;
+
+  let label = "Froid";
+  if (score >= 70) label = "Chaud 🔥";
+  else if (score >= 45) label = "Tiède 🌡️";
+  return { score, label };
+}
+
+function validateLead(clientData) {
+  const errors = [];
+  const nom = (clientData.nom || "").trim();
+  const tel = (clientData.telephone || "").trim();
+  if (nom.length < 2) errors.push("nom invalide");
+  if (!/[0-9]{8,}/.test(tel.replace(/[\s\-+]/g, ""))) errors.push("téléphone invalide");
+  return errors;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  PRICING ENGINE (unchanged from original)
 // ─────────────────────────────────────────────────────────────────────────────
 const PRICES = {
-  etudes: 60,                // DH/m² couvert
-  grosOeuvreHourdis: 1200,   // DH/m²
+  etudes: 60,
+  grosOeuvreHourdis: 1200,
   grosOeuvrePostTension: 1600,
-  murCloture: 400,           // DH/m
-  finition: 3000,            // DH/m²
-  renovation: 6000,          // DH/m²
+  murCloture: 400,
+  finition: 3000,
+  renovation: 6000,
   etancheite: {
     terrasse: 365,
     sdb: 90,
     piscine: 120,
     voile: 160
   },
-  piscine: 3500,             // DH/m²
-  marge: 0.15                // 15%
+  piscine: 3500,
+  marge: 0.15
 };
 
 function calculerDevis(projet) {
   let sousTotal = 0;
   let details = [];
 
-  // 1. Études de projet
   if (projet.type === "Études de projet" && projet.surface) {
     const cout = projet.surface * PRICES.etudes;
     details.push(`📐 Études de projet : ${projet.surface} m² × ${PRICES.etudes} DH = ${cout.toLocaleString()} DH`);
     sousTotal += cout;
   }
-
-  // 2. Construction (gros œuvre + finition)
   if (projet.type === "Construction" && projet.surface) {
     const goPrice = projet.postTension ? PRICES.grosOeuvrePostTension : PRICES.grosOeuvreHourdis;
     const coutGO = projet.surface * goPrice;
     details.push(`🏗️ Gros œuvre (${projet.postTension ? "post-tension" : "hourdis"}) : ${projet.surface} m² × ${goPrice} DH = ${coutGO.toLocaleString()} DH`);
     sousTotal += coutGO;
-
     const coutFinition = projet.surface * PRICES.finition;
     details.push(`🎨 Finition : ${projet.surface} m² × ${PRICES.finition} DH = ${coutFinition.toLocaleString()} DH`);
     sousTotal += coutFinition;
   }
-
-  // 3. Rénovation
   if (projet.type === "Rénovation" && projet.surface) {
     const cout = projet.surface * PRICES.renovation;
     details.push(`🔄 Rénovation : ${projet.surface} m² × ${PRICES.renovation} DH = ${cout.toLocaleString()} DH`);
     sousTotal += cout;
   }
-
-  // 4. Finition seule
   if (projet.type === "Finition" && projet.surface) {
     const cout = projet.surface * PRICES.finition;
     details.push(`🎨 Finition : ${projet.surface} m² × ${PRICES.finition} DH = ${cout.toLocaleString()} DH`);
     sousTotal += cout;
   }
-
-  // 5. Étanchéité (plusieurs sous-types)
   if (projet.type === "Étanchéité") {
     const type = projet.etancheiteType || "terrasse";
     let prix = PRICES.etancheite[type] || PRICES.etancheite.terrasse;
@@ -191,22 +222,17 @@ function calculerDevis(projet) {
     details.push(`💧 Étanchéité ${type} : ${projet.surface || 0} ${unite} × ${prix} DH = ${cout.toLocaleString()} DH`);
     sousTotal += cout;
   }
-
-  // 6. Piscine clés en main
   if (projet.type === "Piscine clés en main" && projet.piscineSurface) {
     const cout = projet.piscineSurface * PRICES.piscine;
     details.push(`🏊 Piscine clés en main : ${projet.piscineSurface} m² × ${PRICES.piscine} DH = ${cout.toLocaleString()} DH`);
     sousTotal += cout;
   }
-
-  // 7. Mur de clôture
   if (projet.type === "Mur de clôture" && projet.clotureLength) {
     const cout = projet.clotureLength * PRICES.murCloture;
     details.push(`🧱 Mur de clôture : ${projet.clotureLength} m × ${PRICES.murCloture} DH = ${cout.toLocaleString()} DH`);
     sousTotal += cout;
   }
-
-  // 8. Option piscine supplémentaire (dans tout type sauf Piscine clés en main)
+  // Pool option (separate surface, NEVER reuse building surface)
   if (projet.pool && projet.type !== "Piscine clés en main" && projet.poolSurface) {
     const cout = projet.poolSurface * PRICES.piscine;
     details.push(`🏊 Option piscine : ${projet.poolSurface} m² × ${PRICES.piscine} DH = ${cout.toLocaleString()} DH`);
@@ -219,351 +245,665 @@ function calculerDevis(projet) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  CONVERSATION FLOW (menu, devis, services, rendez-vous)
+//  GLOBAL INTENT SYSTEM
 // ─────────────────────────────────────────────────────────────────────────────
-const sessions = {};
+const GREETINGS = /^(bonjour|bonsoir|salut|salam|hello|hi|ahlan|coucou|hey|yo)\b/i;
 
-function getSession(id) {
-  if (!sessions[id]) {
-    sessions[id] = {
-      step: null,          // null = menu, "devis_q1..q6", "service_submenu", "rdv_collect"
-      data: {},
-      contact_idx: null,
-      contact_data: {},
-    };
-  }
-  return sessions[id];
-}
-
-// Menu principal (exactement celui du fichier fn)
-const MAIN_MENU = `Bonjour,
-Merci de nous avoir contactés. Nous sommes la société ERPAC. Comment pouvons-nous vous aider ?
-
-Vous pouvez choisir :
-1️⃣ Demander un devis estimatif
-2️⃣ Découvrir nos services
-3️⃣ Voir nos projets réalisés
-4️⃣ Prendre rendez-vous`;
-
-// Sous-menu services enrichi
-const SERVICES_DETAIL = {
-  "1": "🏡 **Villas** : Construction R+1/R+2, finition haut standing, piscine, étanchéité, clôture.\n👉 Devis personnalisé sur étude.",
-  "2": "🏢 **Immeubles** : Résidentiel R+2 à R+5, structure béton, finitions modernes, étanchéité terrasses.",
-  "3": "🏊 **Piscines** : Clés en main (3500 DH/m²). Béton armé, carrelage/liner, système de filtration.",
-  "4": "🔄 **Rénovations** : Complète ou partielle (6000 DH/m²). Devis gratuit.",
-  "5": "🏬 **Locaux commerciaux** : Aménagement, cloisons, plomberie, électricité, CVC.",
-  "6": "💧 **Étanchéité** : Terrasse (365 DH/m²), SDB (90 DH), piscine (120 DH), voile (160 DH/m). Garantie 10 ans."
-};
-
-function getServicesSubmenu() {
-  return `🔧 **Nos spécialités**\n\n1️⃣ Villas\n2️⃣ Immeubles\n3️⃣ Piscines\n4️⃣ Rénovation\n5️⃣ Locaux commerciaux\n6️⃣ Étanchéité\n\nTapez le numéro pour plus de détails ou "menu" pour revenir.`;
-}
-
-// Questions du devis (6 étapes, comme dans le fichier fn)
-const DEVIS_QUESTIONS = [
-  { key: "type", q: "1️⃣ Quel est le type de projet ?\n- Construction\n- Rénovation\n- Finition\n- Étanchéité\n- Piscine clés en main\n- Mur de clôture\n- Études de projet\n- Autre" },
-  { key: "city", q: "2️⃣ Où se situe le projet ? (Ville / quartier)" },
-  { key: "surface", q: "3️⃣ Quelle est la surface approximative en m² ?" },
-  { key: "description", q: "4️⃣ Pouvez-vous décrire les travaux souhaités ?\nExemple : gros œuvre, finition, rénovation complète, étanchéité terrasse, piscine clés en main" },
-  { key: "plans", q: "5️⃣ Avez-vous des plans, photos ou autorisation ?\nOui / Non" },
-  { key: "delai", q: "6️⃣ Quand voulez-vous commencer les travaux ?" }
+const INTENT_MAP = [
+  { intent: "menu",       pattern: /\b(menu|accueil|retour accueil|recommencer|annuler|stop|début|debut|home)\b/i },
+  { intent: "devis",      pattern: /\b(devis|estimation|estimer|prix|tarif|coût|cout|quote)\b/i },
+  { intent: "services",   pattern: /\b(service|services|offre|prestations|spécialité)\b/i },
+  { intent: "rdv",        pattern: /\b(rendez-vous|rdv|rendezvous|appointment|visite|rencontre)\b/i },
+  { intent: "projets",    pattern: /\b(projets|réalisations|portfolio|references|exemples)\b/i },
+  { intent: "conseiller", pattern: /\b(conseiller|agent|commercial|humain|parler à|appel|téléphone|contact)\b/i },
+  { intent: "aide",       pattern: /\b(aide|help|aidez|comment|que puis|options|quoi faire)\b/i },
 ];
 
-function startDevis(sess) {
-  sess.step = "devis_q1";
-  sess.data = {};
-  return DEVIS_QUESTIONS[0].q;
-}
-
-function processDevisStep(sess, message) {
-  const step = sess.step;
-  if (step === "devis_q1") {
-    sess.data.type = message;
-    sess.step = "devis_q2";
-    return DEVIS_QUESTIONS[1].q;
-  }
-  if (step === "devis_q2") {
-    sess.data.city = message;
-    sess.step = "devis_q3";
-    return DEVIS_QUESTIONS[2].q;
-  }
-  if (step === "devis_q3") {
-    let surf = parseFloat(message.replace(/[^\d.,]/g, "").replace(",", "."));
-    if (isNaN(surf)) return "❌ Surface non valide. Veuillez entrer un nombre (ex: 200).";
-    sess.data.surface = surf;
-    sess.step = "devis_q4";
-    return DEVIS_QUESTIONS[3].q;
-  }
-  if (step === "devis_q4") {
-    sess.data.description = message;
-    sess.step = "devis_q5";
-    return DEVIS_QUESTIONS[4].q;
-  }
-  if (step === "devis_q5") {
-    sess.data.plans = message;
-    sess.step = "devis_q6";
-    return DEVIS_QUESTIONS[5].q;
-  }
-  if (step === "devis_q6") {
-    sess.data.delai = message;
-    // Construire l'objet projet pour le calcul
-    let projet = {
-      type: sess.data.type,
-      surface: sess.data.surface,
-      description: sess.data.description,
-      pool: false,
-      postTension: false,
-      etancheiteType: "terrasse"
-    };
-    // Détection piscine optionnelle
-    if (projet.description.toLowerCase().includes("piscine") && projet.type !== "Piscine clés en main") {
-      projet.pool = true;
-      let match = projet.description.match(/(\d+)\s*m/i);
-      projet.poolSurface = match ? parseFloat(match[1]) : 32;
-    }
-    // Détection post-tension
-    if (projet.type === "Construction" && projet.description.toLowerCase().includes("post tension")) {
-      projet.postTension = true;
-    }
-    // Type d'étanchéité
-    if (projet.type === "Étanchéité") {
-      if (projet.description.includes("sdb")) projet.etancheiteType = "sdb";
-      else if (projet.description.includes("piscine")) projet.etancheiteType = "piscine";
-      else if (projet.description.includes("voile")) projet.etancheiteType = "voile";
-    }
-    // Surface de piscine si type "Piscine clés en main"
-    if (projet.type === "Piscine clés en main") {
-      projet.piscineSurface = projet.surface;
-    }
-    // Longueur de mur de clôture
-    if (projet.type === "Mur de clôture") {
-      projet.clotureLength = projet.surface;
-    }
-
-    const { sousTotal, marge, total, details } = calculerDevis(projet);
-    let reponse = "📊 **Estimation ERPAC**\n\n";
-    details.forEach(d => { reponse += d + "\n\n"; });
-    if (sousTotal > 0) {
-      reponse += `Sous-total : ${sousTotal.toLocaleString()} DH\n\n`;
-      reponse += `Marge ERPAC 15% : ${marge.toLocaleString()} DH\n\n`;
-      reponse += `💰 **Total estimatif : ${total.toLocaleString()} DH**\n\n`;
-    } else {
-      reponse += `💰 **Total : à définir après étude**\n\n`;
-    }
-    reponse += `⚠️ Ce devis est une estimation approximative. Le prix final sera confirmé après visite technique et étude du projet.\n\n`;
-    reponse += `Souhaitez-vous :\n1️⃣ Être contacté par un conseiller\n2️⃣ Envoyer des photos/plans\n3️⃣ Modifier les informations\n4️⃣ Retour au menu principal`;
-    sess.data.estimate_total = total;
-    sess.step = "devis_result";
-    return reponse;
-  }
-  if (step === "devis_result") {
-    const opt = message.trim().toLowerCase();
-    if (opt === "1" || opt.includes("contacté")) {
-      sess.contact_idx = 0;
-      sess.contact_data = {};
-      return `📞 Pour être contacté par un conseiller, veuillez me donner :\n\n1️⃣ Nom complet ?`;
-    }
-    if (opt === "2" || opt.includes("photo") || opt.includes("plan")) {
-      return `📎 Vous pouvez envoyer vos photos ou plans ici même (WhatsApp). Un conseiller les étudiera et vous recontactera rapidement. Souhaitez-vous laisser vos coordonnées ? (Oui/Non)`;
-    }
-    if (opt === "3" || opt.includes("modifier")) {
-      sess.step = "devis_q1";
-      sess.data = {};
-      return DEVIS_QUESTIONS[0].q;
-    }
-    if (opt === "4" || opt.includes("menu")) {
-      delete sessions[sess.id];
-      return MAIN_MENU;
-    }
-    return "Option non reconnue. Répondez 1, 2, 3 ou 4.";
-  }
-  return null;
-}
-
-// Rendez-vous flow (7 questions)
-function startRdv(sess) {
-  sess.contact_data = { rdv_step: 0 };
-  sess.contact_idx = 99; // marqueur pour le flow rdv
-  return `📅 Prise de rendez-vous\n\nMerci de me donner :\n1️⃣ Nom complet ?`;
-}
-
-function processRdv(sess, message, sessionId) {
-  const fields = ["nom", "telephone", "ville", "type", "date", "heure", "description"];
-  if (!sess.contact_data.rdv_step) sess.contact_data.rdv_step = 0;
-  const step = sess.contact_data.rdv_step;
-  if (step < fields.length) {
-    sess.contact_data[fields[step]] = message;
-    sess.contact_data.rdv_step++;
-    const nextPrompts = [
-      "Nom complet",
-      "Numéro de téléphone",
-      "Ville du projet",
-      "Type de projet",
-      "Date souhaitée",
-      "Heure souhaitée",
-      "Description rapide du besoin"
-    ];
-    if (sess.contact_data.rdv_step < fields.length) {
-      return `${sess.contact_data.rdv_step+1}️⃣ ${nextPrompts[sess.contact_data.rdv_step]} ?`;
-    }
-    // Tous collectés
-    const client = {
-      nom: sess.contact_data.nom,
-      telephone: sess.contact_data.telephone,
-      email: ""
-    };
-    const project = {
-      type: sess.contact_data.type,
-      city: sess.contact_data.ville,
-      surface: ""
-    };
-    const recapitulatif = `✅ **Rendez-vous enregistré !**\n\n👤 Nom : ${sess.contact_data.nom}\n📞 Tél : ${sess.contact_data.telephone}\n📍 Ville : ${sess.contact_data.ville}\n🏗️ Projet : ${sess.contact_data.type}\n📅 Date : ${sess.contact_data.date}\n⏰ Heure : ${sess.contact_data.heure}\n📝 Besoin : ${sess.contact_data.description}\n\nUn conseiller ERPAC vous contactera pour confirmer.\n\nSouhaitez-vous :\n1️⃣ Retour au menu principal\n2️⃣ Demander une estimation\n3️⃣ Contacter directement un conseiller`;
-    notifyLead(client, project, "RDV");
-    delete sessions[sessionId];
-    return recapitulatif;
-  }
-  return null;
-}
-
-// Collecte des coordonnées après devis (nom, téléphone, email)
-function processContact(sess, message, sessionId) {
-  if (!sess.contact_idx) sess.contact_idx = 0;
-  const steps = ["nom", "telephone", "email"];
-  const idx = sess.contact_idx;
-  if (idx < steps.length) {
-    sess.contact_data[steps[idx]] = message;
-    sess.contact_idx++;
-    if (idx === 0) return "2️⃣ Numéro de téléphone ?";
-    if (idx === 1) return "3️⃣ Email (facultatif) ?";
-    if (idx === 2) {
-      const client = {
-        nom: sess.contact_data.nom,
-        telephone: sess.contact_data.telephone,
-        email: sess.contact_data.email || "non fourni"
-      };
-      const project = {
-        type: sess.data.type,
-        city: sess.data.city,
-        surface: sess.data.surface
-      };
-      const total = sess.data.estimate_total || "0";
-      notifyLead(client, project, total);
-      delete sessions[sessionId];
-      return `✅ **Merci ${client.nom}** ! Votre demande a bien été enregistrée. Un conseiller ERPAC vous contactera sous 24h.\n\n📞 ${client.telephone}\n\nSouhaitez-vous retourner au menu principal ? (Oui/Non)`;
-    }
+function detectIntent(text) {
+  const t = text.trim();
+  if (GREETINGS.test(t)) return "greeting";
+  for (const { intent, pattern } of INTENT_MAP) {
+    if (pattern.test(t)) return intent;
   }
   return null;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  PROCESS MESSAGE PRINCIPAL
+//  CONTEXTUAL ENTITY EXTRACTION
 // ─────────────────────────────────────────────────────────────────────────────
-function processMessage(sessionId, raw) {
-  const msg = raw.trim();
-  if (!msg) return { reply: MAIN_MENU, next_step: "menu" };
-  const sess = getSession(sessionId);
-  sess.id = sessionId;
+const CITIES = [
+  "casablanca","rabat","marrakech","tanger","fès","fes","meknès","meknes",
+  "agadir","oujda","témara","temara","salé","sale","mohammedia","kenitra",
+  "berrechid","settat","benslimane","el jadida","laayoune","dakhla"
+];
 
-  // 1. Flow Rendez-vous (contact_idx === 99)
-  if (sess.contact_idx === 99) {
-    const reply = processRdv(sess, msg, sessionId);
-    if (reply) return { reply, next_step: "rdv" };
-  }
+const PROJECT_TYPES = [
+  { pattern: /\b(villa|maison|résidence|residence|habitation|domicile)\b/i, type: "Construction" },
+  { pattern: /\b(immeuble|résidentiel|appartement|batiment|bâtiment)\b/i, type: "Construction" },
+  { pattern: /\b(renovation|rénovation|rénover|refaire|moderniser)\b/i, type: "Rénovation" },
+  { pattern: /\b(finition|peinture|carrelage|enduit|revêtement)\b/i, type: "Finition" },
+  { pattern: /\b(etancheite|étanchéité|étanche|fuite|imperméable)\b/i, type: "Étanchéité" },
+  { pattern: /\b(piscine)\b/i, type: "Piscine clés en main" },
+  { pattern: /\b(cloture|clôture|mur de cloture|mur périphérique|enceinte)\b/i, type: "Mur de clôture" },
+  { pattern: /\b(etude|étude|plan|plans|architecte|permis)\b/i, type: "Études de projet" },
+];
 
-  // 2. Flow collecte contact après devis
-  if (sess.contact_idx !== null && sess.contact_idx !== undefined && sess.contact_idx < 3 && sess.contact_idx !== 99) {
-    const reply = processContact(sess, msg, sessionId);
-    if (reply) return { reply, next_step: "contact" };
+function extractSurface(text) {
+  // Try with unit first
+  let m = text.match(/(\d+(?:[.,]\d+)?)\s*m[²2]?/i);
+  if (m) return parseFloat(m[1].replace(",", "."));
+  // Natural phrasing: "environ 450", "je pense 600", "autour de 300"
+  m = text.match(/(?:environ|autour|vers|à peu près|je pense|peut-être|approximately|around)\s+(\d{2,4})\b/i);
+  if (m) return parseFloat(m[1]);
+  // Last resort: lone 2-4 digit number
+  m = text.match(/\b(\d{2,4})\b/);
+  if (m) {
+    const n = parseFloat(m[1]);
+    if (n >= 10 && n <= 9999) return n;
   }
-
-  // 3. Flow devis actif
-  if (sess.step && sess.step.startsWith("devis")) {
-    const reply = processDevisStep(sess, msg);
-    if (reply) return { reply, next_step: sess.step };
-  }
-
-  // 4. Sous-menu services
-  if (sess.step === "service_submenu") {
-    if (msg.toLowerCase() === "menu") {
-      delete sessions[sessionId];
-      return { reply: MAIN_MENU, next_step: "menu" };
-    }
-    const detail = SERVICES_DETAIL[msg];
-    if (detail) {
-      sess.step = "service_detail";
-      return { reply: detail + "\n\nSouhaitez-vous une estimation pour ce type de projet ? (Oui/Non)", next_step: "service_detail" };
-    }
-    return { reply: "Option non reconnue. Tapez 1 à 6 ou 'menu'.", next_step: "service_submenu" };
-  }
-  if (sess.step === "service_detail") {
-    if (/oui|yes|o|yeah|ok/i.test(msg)) {
-      // Lancer devis avec le type prédéfini (Construction par défaut, mais on pourrait affiner)
-      sess.step = "devis_q1";
-      sess.data = { type: "Construction" }; // à améliorer selon le choix
-      return { reply: DEVIS_QUESTIONS[0].q, next_step: "devis_q1" };
-    }
-    delete sessions[sessionId];
-    return { reply: MAIN_MENU, next_step: "menu" };
-  }
-
-  // 5. Menu principal / intentions simples
-  const lowerMsg = msg.toLowerCase();
-  if (lowerMsg === "1" || lowerMsg === "1️⃣" || lowerMsg.includes("devis")) {
-    return { reply: startDevis(sess), next_step: "devis_q1" };
-  }
-  if (lowerMsg === "2" || lowerMsg === "2️⃣" || lowerMsg.includes("service")) {
-    sess.step = "service_submenu";
-    return { reply: getServicesSubmenu(), next_step: "service_submenu" };
-  }
-  if (lowerMsg === "3" || lowerMsg === "3️⃣" || lowerMsg.includes("projet") || lowerMsg.includes("réalisations")) {
-    return { reply: `🔗 **Nos réalisations** : https://www.erpac.ma/projects.cfm\n\nSouhaitez-vous une estimation pour un projet similaire ? (Oui/Non)`, next_step: "projects_redirect" };
-  }
-  if (lowerMsg === "4" || lowerMsg === "4️⃣" || lowerMsg.includes("rdv") || lowerMsg.includes("rendez-vous")) {
-    return { reply: startRdv(sess), next_step: "rdv" };
-  }
-  if (lowerMsg === "menu" || lowerMsg === "accueil" || lowerMsg === "bonjour" || lowerMsg === "salut") {
-    delete sessions[sessionId];
-    return { reply: MAIN_MENU, next_step: "menu" };
-  }
-
-  // 6. Détection automatique d'un projet (ex: "villa 200m² Rabat piscine")
-  const extracted = extractProjectFromMessage(msg);
-  if (extracted.surface && (extracted.type || extracted.pool)) {
-    sess.data = extracted;
-    sess.data.description = msg;
-    sess.data.plans = "non spécifié";
-    sess.data.delai = "à préciser";
-    sess.step = "devis_q6";
-    const reply = processDevisStep(sess, "calcul auto");
-    if (reply) return { reply, next_step: "devis_result" };
-  }
-
-  // 7. Par défaut, afficher le menu
-  return { reply: MAIN_MENU, next_step: "menu" };
+  return null;
 }
 
-// Aide à l'extraction de projet depuis un message libre
+function extractPoolSurface(text) {
+  // Explicit pool size
+  let m = text.match(/piscine[^0-9]*(\d+)\s*m[²2]?/i);
+  if (m) return parseFloat(m[1]);
+  m = text.match(/(\d+)\s*m[²2]?\s*(?:de\s+)?piscine/i);
+  if (m) return parseFloat(m[1]);
+  return null;
+}
+
 function extractProjectFromMessage(text) {
   const data = {};
-  let surfaceMatch = text.match(/(\d+(?:[.,]\d+)?)\s*m[²2]?/i);
-  if (!surfaceMatch) surfaceMatch = text.match(/\b(\d{2,4})\b/);
-  if (surfaceMatch) data.surface = parseFloat(surfaceMatch[1].replace(",", "."));
-  const cities = ["casablanca","rabat","marrakech","tanger","fès","meknès","agadir","oujda","témara","salé","mohammedia","kenitra"];
-  for (let c of cities) {
+
+  // Surface
+  const surf = extractSurface(text);
+  if (surf) data.surface = surf;
+
+  // City
+  for (const c of CITIES) {
     if (text.toLowerCase().includes(c)) {
       data.city = c.charAt(0).toUpperCase() + c.slice(1);
       break;
     }
   }
-  if (/villa/i.test(text)) data.type = "Construction";
-  else if (/renovation|rénovation/i.test(text)) data.type = "Rénovation";
-  else if (/piscine/i.test(text)) data.type = "Piscine clés en main";
-  else if (/finition/i.test(text)) data.type = "Finition";
-  else if (/etancheite|étanchéité/i.test(text)) data.type = "Étanchéité";
-  else if (/cloture|mur/i.test(text)) data.type = "Mur de clôture";
-  else if (/etude|plan/i.test(text)) data.type = "Études de projet";
-  if (/piscine/i.test(text) && !data.type) data.pool = true;
+
+  // Project type
+  for (const { pattern, type } of PROJECT_TYPES) {
+    if (pattern.test(text)) {
+      data.type = type;
+      break;
+    }
+  }
+
+  // Pool as extra (when construction)
+  if (/\bpiscine\b/i.test(text) && data.type && data.type !== "Piscine clés en main") {
+    data.pool = true;
+    const ps = extractPoolSurface(text);
+    data.poolSurface = ps || null; // null = need to ask
+  }
+
+  // Additional flags
+  if (/\bsous-sol\b/i.test(text)) data.basement = true;
+  if (/\bpost.?tension\b/i.test(text)) data.postTension = true;
+  if (/\b(sdb|salle de bain|salle d'eau)\b/i.test(text) && data.type === "Étanchéité") data.etancheiteType = "sdb";
+  if (/\bvoile\b/i.test(text) && data.type === "Étanchéité") data.etancheiteType = "voile";
+
   return data;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  SESSION MANAGEMENT (with inactivity cleanup)
+// ─────────────────────────────────────────────────────────────────────────────
+const sessions = {};
+const SESSION_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
+
+function getSession(id) {
+  if (!sessions[id]) {
+    sessions[id] = createFreshSession();
+  }
+  sessions[id].lastActivity = Date.now();
+  return sessions[id];
+}
+
+function createFreshSession() {
+  return {
+    flow: null,       // "devis" | "contact" | "rdv" | "service_submenu" | "service_detail"
+    stage: null,      // stage within the flow
+    collectedData: {},
+    retryCount: {},   // per-stage retry counters
+    lastActivity: Date.now(),
+  };
+}
+
+function resetSession(id) {
+  sessions[id] = createFreshSession();
+  return sessions[id];
+}
+
+// Cleanup stale sessions every 10 minutes
+setInterval(() => {
+  const now = Date.now();
+  for (const id of Object.keys(sessions)) {
+    if (now - sessions[id].lastActivity > SESSION_TIMEOUT_MS) {
+      delete sessions[id];
+      console.log(`🗑️ Session expirée nettoyée: ${id}`);
+    }
+  }
+}, 10 * 60 * 1000);
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  CONTENT STRINGS
+// ─────────────────────────────────────────────────────────────────────────────
+const MAIN_MENU = `Bonjour ! Je suis l'assistant ERPAC 😊
+
+Comment puis-je vous aider ?
+
+1️⃣ Demander un devis estimatif
+2️⃣ Découvrir nos services
+3️⃣ Voir nos projets réalisés
+4️⃣ Prendre rendez-vous`;
+
+const SMART_FALLBACK = `Je n'ai pas bien compris 😊
+
+Souhaitez-vous :
+1️⃣ Demander un devis
+2️⃣ Découvrir nos services
+3️⃣ Prendre rendez-vous`;
+
+const SERVICES_DETAIL = {
+  "1": "🏡 *Villas* : Construction R+1/R+2, finition haut standing, piscine, étanchéité, clôture.\n👉 Devis personnalisé sur étude.",
+  "2": "🏢 *Immeubles* : Résidentiel R+2 à R+5, structure béton, finitions modernes, étanchéité terrasses.",
+  "3": "🏊 *Piscines* : Clés en main (3500 DH/m²). Béton armé, carrelage/liner, système de filtration.",
+  "4": "🔄 *Rénovations* : Complète ou partielle (6000 DH/m²). Devis gratuit.",
+  "5": "🏬 *Locaux commerciaux* : Aménagement, cloisons, plomberie, électricité, CVC.",
+  "6": "💧 *Étanchéité* : Terrasse (365 DH/m²), SDB (90 DH), piscine (120 DH), voile (160 DH/m). Garantie 10 ans."
+};
+
+function getServicesSubmenu() {
+  return `🔧 *Nos spécialités*\n\n1️⃣ Villas\n2️⃣ Immeubles\n3️⃣ Piscines\n4️⃣ Rénovation\n5️⃣ Locaux commerciaux\n6️⃣ Étanchéité\n\nTapez le numéro ou "menu" pour revenir.`;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  DEVIS FLOW (smart, flexible)
+// ─────────────────────────────────────────────────────────────────────────────
+function startDevis(sess, prefilled = {}) {
+  sess.flow = "devis";
+  sess.collectedData = { ...prefilled };
+  return advanceDevis(sess);
+}
+
+function advanceDevis(sess) {
+  const d = sess.collectedData;
+
+  if (!d.type) {
+    sess.stage = "type";
+    return `Quel type de projet ?\n\n- Construction\n- Rénovation\n- Finition\n- Étanchéité\n- Piscine clés en main\n- Mur de clôture\n- Études de projet`;
+  }
+  if (!d.city) {
+    sess.stage = "city";
+    return `Où se situe le projet ? (ville ou quartier)`;
+  }
+  if (!d.surface && d.type !== "Mur de clôture") {
+    sess.stage = "surface";
+    return `Quelle surface approximative en m² ?`;
+  }
+  if (d.type === "Mur de clôture" && !d.clotureLength) {
+    sess.stage = "cloture_length";
+    return `Quelle est la longueur du mur en mètres ?`;
+  }
+  if (d.pool && d.poolSurface === null) {
+    sess.stage = "pool_surface";
+    return `Quelle surface souhaitez-vous pour la piscine ? (entre 24 et 40 m² en général)`;
+  }
+  if (!d.description) {
+    sess.stage = "description";
+    return `Décrivez brièvement les travaux :\nEx: gros œuvre + finition, rénovation complète, étanchéité terrasse...`;
+  }
+  if (!d.plans) {
+    sess.stage = "plans";
+    return `Avez-vous des plans, photos ou autorisation ? (Oui / Non)`;
+  }
+  if (!d.delai) {
+    sess.stage = "delai";
+    return `Quand souhaitez-vous démarrer les travaux ?`;
+  }
+
+  return computeAndShowDevis(sess);
+}
+
+function processDevisInput(sess, msg) {
+  const stage = sess.stage;
+  const d = sess.collectedData;
+
+  if (stage === "type") {
+    const detected = detectProjectType(msg);
+    if (detected) {
+      d.type = detected;
+      sess.retryCount["type"] = 0;
+    } else {
+      sess.retryCount["type"] = (sess.retryCount["type"] || 0) + 1;
+      if (sess.retryCount["type"] >= 2) {
+        d.type = "Construction"; // graceful default
+        return `Je retiens "Construction" comme type. ` + advanceDevis(sess);
+      }
+      return `Je n'ai pas reconnu ce type. Choisissez parmi :\n\n- Construction\n- Rénovation\n- Finition\n- Étanchéité\n- Piscine clés en main\n- Mur de clôture\n- Études de projet`;
+    }
+    return advanceDevis(sess);
+  }
+
+  if (stage === "city") {
+    d.city = msg.trim();
+    return advanceDevis(sess);
+  }
+
+  if (stage === "surface") {
+    const surf = extractSurface(msg);
+    if (surf && surf >= 5 && surf <= 50000) {
+      d.surface = surf;
+      sess.retryCount["surface"] = 0;
+      return advanceDevis(sess);
+    }
+    sess.retryCount["surface"] = (sess.retryCount["surface"] || 0) + 1;
+    if (sess.retryCount["surface"] >= 2) {
+      return `Pas de problème, on peut continuer sans la surface exacte 😊\n\n` + (d.description ? advanceDevis(sess) : (() => { sess.stage = "description"; return `Décrivez brièvement les travaux souhaités.`; })());
+    }
+    return `Je n'ai pas saisi la surface. Entrez un nombre en m² :\nEx: 200, 350m², "environ 400"`;
+  }
+
+  if (stage === "cloture_length") {
+    const len = extractSurface(msg);
+    if (len && len >= 1) {
+      d.clotureLength = len;
+      return advanceDevis(sess);
+    }
+    return `Longueur en mètres ? (ex: 50, 80m)`;
+  }
+
+  if (stage === "pool_surface") {
+    const ps = extractSurface(msg);
+    if (ps && ps >= 5 && ps <= 500) {
+      d.poolSurface = ps;
+    } else {
+      d.poolSurface = 32; // realistic default
+    }
+    return advanceDevis(sess);
+  }
+
+  if (stage === "description") {
+    d.description = msg.trim();
+
+    // Auto-detect pool from description (ONLY set pool surface if not already known)
+    if (/\bpiscine\b/i.test(msg) && d.type !== "Piscine clés en main") {
+      d.pool = true;
+      const ps = extractPoolSurface(msg);
+      d.poolSurface = ps || null; // null triggers pool_surface question
+    }
+
+    // Post-tension detection
+    if (/post.?tension/i.test(msg)) d.postTension = true;
+
+    // Étanchéité subtype
+    if (d.type === "Étanchéité") {
+      if (/sdb|salle de bain/i.test(msg)) d.etancheiteType = "sdb";
+      else if (/piscine/i.test(msg)) d.etancheiteType = "piscine";
+      else if (/voile/i.test(msg)) d.etancheiteType = "voile";
+      else d.etancheiteType = "terrasse";
+    }
+
+    return advanceDevis(sess);
+  }
+
+  if (stage === "plans") {
+    d.plans = msg.trim();
+    return advanceDevis(sess);
+  }
+
+  if (stage === "delai") {
+    d.delai = msg.trim();
+    return advanceDevis(sess);
+  }
+
+  if (stage === "result") {
+    return handleDevisResult(sess, msg);
+  }
+
+  return null;
+}
+
+function detectProjectType(text) {
+  for (const { pattern, type } of PROJECT_TYPES) {
+    if (pattern.test(text)) return type;
+  }
+  // Direct keyword match
+  const t = text.toLowerCase().trim();
+  if (t.includes("construction")) return "Construction";
+  if (t.includes("rénovation") || t.includes("renovation")) return "Rénovation";
+  if (t.includes("finition")) return "Finition";
+  if (t.includes("étanchéité") || t.includes("etancheite")) return "Étanchéité";
+  if (t.includes("piscine")) return "Piscine clés en main";
+  if (t.includes("clôture") || t.includes("cloture") || t.includes("mur")) return "Mur de clôture";
+  if (t.includes("étude") || t.includes("etude") || t.includes("plan")) return "Études de projet";
+  // Number shortcuts
+  if (t === "1") return "Construction";
+  if (t === "2") return "Rénovation";
+  if (t === "3") return "Finition";
+  if (t === "4") return "Étanchéité";
+  if (t === "5") return "Piscine clés en main";
+  if (t === "6") return "Mur de clôture";
+  if (t === "7") return "Études de projet";
+  return null;
+}
+
+function computeAndShowDevis(sess) {
+  const d = sess.collectedData;
+  let projet = {
+    type: d.type,
+    surface: d.surface,
+    description: d.description || "",
+    pool: d.pool || false,
+    poolSurface: d.poolSurface || 32,
+    postTension: d.postTension || false,
+    etancheiteType: d.etancheiteType || "terrasse",
+    piscineSurface: d.type === "Piscine clés en main" ? d.surface : undefined,
+    clotureLength: d.type === "Mur de clôture" ? d.clotureLength : undefined,
+  };
+
+  const { sousTotal, marge, total, details } = calculerDevis(projet);
+  sess.collectedData.estimate_total = total;
+  sess.stage = "result";
+
+  let reponse = `📊 *Estimation ERPAC*\n\n`;
+  details.forEach(d => { reponse += d + "\n"; });
+  if (sousTotal > 0) {
+    reponse += `\nSous-total : ${sousTotal.toLocaleString()} DH`;
+    reponse += `\nMarge ERPAC 15% : ${marge.toLocaleString()} DH`;
+    reponse += `\n💰 *Total estimatif : ${total.toLocaleString()} DH*\n`;
+  } else {
+    reponse += `\n💰 *Total : à définir après étude*\n`;
+  }
+  reponse += `\n⚠️ Estimation approximative, confirmée après visite technique.\n\n`;
+  reponse += `Souhaitez-vous :\n1️⃣ Être contacté par un conseiller\n2️⃣ Envoyer des photos/plans\n3️⃣ Modifier les informations\n4️⃣ Retour menu`;
+
+  return reponse;
+}
+
+function handleDevisResult(sess, msg) {
+  const opt = msg.trim().toLowerCase();
+  if (opt === "1" || /contact|conseiller|rappel|appel/i.test(msg)) {
+    return startContactCollection(sess, "devis");
+  }
+  if (opt === "2" || /photo|plan/i.test(msg)) {
+    return `📎 Envoyez vos photos ou plans ici (WhatsApp). Un conseiller les étudiera rapidement.\n\nSouhaitez-vous laisser vos coordonnées ? (Oui/Non)`;
+  }
+  if (opt === "3" || /modifi|recommencer|changer/i.test(msg)) {
+    return startDevis(sess, {});
+  }
+  if (opt === "4" || /menu|accueil/i.test(msg)) {
+    return null; // triggers menu reset
+  }
+  if (/oui|yes/i.test(msg)) {
+    return startContactCollection(sess, "devis");
+  }
+  return `Répondez 1, 2, 3 ou 4 😊`;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  CONTACT COLLECTION FLOW
+// ─────────────────────────────────────────────────────────────────────────────
+function startContactCollection(sess, origin) {
+  sess.flow = "contact";
+  sess.stage = "nom";
+  sess.collectedData.contact_origin = origin;
+  sess.collectedData.contact = {};
+  return `Pour qu'un conseiller vous contacte :\n\n👤 Votre nom complet ?`;
+}
+
+function processContactInput(sess, msg, sessionId) {
+  const stage = sess.stage;
+  const contact = sess.collectedData.contact || {};
+  sess.collectedData.contact = contact;
+
+  if (stage === "nom") {
+    if (msg.trim().length < 2) return `Votre nom complet s'il vous plaît 😊`;
+    contact.nom = msg.trim();
+    sess.stage = "telephone";
+    return `📞 Numéro de téléphone ?`;
+  }
+
+  if (stage === "telephone") {
+    const cleaned = msg.replace(/[\s\-]/g, "");
+    if (!/[0-9]{8,}/.test(cleaned)) {
+      return `Numéro non valide. Format: 0612345678 ou +212612345678`;
+    }
+    contact.telephone = msg.trim();
+    sess.stage = "email";
+    return `📧 Email ? (optionnel, tapez "non" pour ignorer)`;
+  }
+
+  if (stage === "email") {
+    contact.email = /non|skip|pas|rien/i.test(msg) ? "non fourni" : msg.trim();
+
+    const client = { nom: contact.nom, telephone: contact.telephone, email: contact.email };
+    const errors = validateLead(client);
+    if (errors.length > 0) {
+      return `Problème détecté : ${errors.join(", ")}. Merci de corriger.`;
+    }
+
+    const project = {
+      type: sess.collectedData.type || "",
+      city: sess.collectedData.city || "",
+      surface: sess.collectedData.surface || "",
+    };
+    const total = sess.collectedData.estimate_total || "À définir";
+    notifyLead(client, project, total);
+
+    const origin = sess.collectedData.contact_origin || "devis";
+    delete sessions[sessionId];
+
+    return `✅ *Merci ${contact.nom} !*\n\nVotre demande a été enregistrée. Un conseiller ERPAC vous contactera sous 24h.\n\n📞 ${contact.telephone}\n\nBonne journée ! 😊`;
+  }
+
+  return null;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  RDV FLOW
+// ─────────────────────────────────────────────────────────────────────────────
+function startRdv(sess) {
+  sess.flow = "rdv";
+  sess.stage = "rdv_nom";
+  sess.collectedData.rdv = {};
+  return `📅 *Prise de rendez-vous*\n\n👤 Votre nom complet ?`;
+}
+
+const RDV_STAGES = [
+  { stage: "rdv_nom",       field: "nom",         next: "rdv_tel",         prompt: "📞 Numéro de téléphone ?" },
+  { stage: "rdv_tel",       field: "telephone",   next: "rdv_ville",       prompt: "📍 Ville du projet ?" },
+  { stage: "rdv_ville",     field: "ville",       next: "rdv_type",        prompt: "🏗️ Type de projet ?" },
+  { stage: "rdv_type",      field: "type",        next: "rdv_date",        prompt: "📅 Date souhaitée ?" },
+  { stage: "rdv_date",      field: "date",        next: "rdv_heure",       prompt: "⏰ Heure souhaitée ?" },
+  { stage: "rdv_heure",     field: "heure",       next: "rdv_description", prompt: "📝 Décrivez brièvement votre besoin." },
+  { stage: "rdv_description", field: "description", next: "done",         prompt: null },
+];
+
+function processRdvInput(sess, msg, sessionId) {
+  const currentStageConfig = RDV_STAGES.find(s => s.stage === sess.stage);
+  if (!currentStageConfig) return null;
+
+  const rdv = sess.collectedData.rdv || {};
+  sess.collectedData.rdv = rdv;
+  rdv[currentStageConfig.field] = msg.trim();
+
+  if (currentStageConfig.next === "done") {
+    const client = { nom: rdv.nom, telephone: rdv.telephone, email: "" };
+    const project = { type: rdv.type, city: rdv.ville, surface: "" };
+    notifyLead(client, project, "RDV");
+
+    const recap = `✅ *Rendez-vous enregistré !*\n\n👤 ${rdv.nom}\n📞 ${rdv.telephone}\n📍 ${rdv.ville}\n🏗️ ${rdv.type}\n📅 ${rdv.date} à ${rdv.heure}\n📝 ${rdv.description}\n\nUn conseiller vous contactera pour confirmer 😊`;
+    delete sessions[sessionId];
+    return recap;
+  }
+
+  sess.stage = currentStageConfig.next;
+  const nextConfig = RDV_STAGES.find(s => s.stage === currentStageConfig.next);
+  return nextConfig ? nextConfig.prompt : null;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  SMART INTERRUPTION HANDLER
+//  Called before any flow-specific logic — handles global intents at any stage
+// ─────────────────────────────────────────────────────────────────────────────
+function handleGlobalIntent(intent, sess, sessionId) {
+  switch (intent) {
+    case "greeting":
+      // If in a flow, acknowledge and continue
+      if (sess.flow) {
+        return `Bonjour ! 😊 Continuons — ` + resumeCurrentStep(sess);
+      }
+      return MAIN_MENU;
+
+    case "menu":
+      resetSession(sessionId);
+      return MAIN_MENU;
+
+    case "devis":
+      // Switch to devis flow, preserving already-extracted data
+      const extracted = sess.collectedData || {};
+      resetSession(sessionId);
+      const newSess = getSession(sessionId);
+      return startDevis(newSess, extracted);
+
+    case "rdv":
+      resetSession(sessionId);
+      return startRdv(getSession(sessionId));
+
+    case "services":
+      resetSession(sessionId);
+      const s = getSession(sessionId);
+      s.flow = "service_submenu";
+      s.stage = "service_submenu";
+      return getServicesSubmenu();
+
+    case "conseiller":
+      resetSession(sessionId);
+      return startContactCollection(getSession(sessionId), "direct");
+
+    case "aide":
+      return SMART_FALLBACK;
+
+    default:
+      return null;
+  }
+}
+
+function resumeCurrentStep(sess) {
+  if (sess.flow === "devis") return advanceDevis(sess);
+  if (sess.flow === "rdv") {
+    const cfg = RDV_STAGES.find(s => s.stage === sess.stage);
+    return cfg ? cfg.prompt : MAIN_MENU;
+  }
+  return MAIN_MENU;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  MAIN PROCESS MESSAGE
+// ─────────────────────────────────────────────────────────────────────────────
+function processMessage(sessionId, raw) {
+  if (!raw || !raw.trim()) return { reply: MAIN_MENU, next_step: "menu" };
+  const msg = raw.trim();
+  const sess = getSession(sessionId);
+  sess.id = sessionId;
+
+  // 1. Global intent detection (works at ANY step)
+  const intent = detectIntent(msg);
+  if (intent && !(intent === "greeting" && !sess.flow)) {
+    // For greetings without active flow → fall through to menu logic
+    if (intent !== "greeting" || sess.flow) {
+      const intentReply = handleGlobalIntent(intent, sess, sessionId);
+      if (intentReply) return { reply: intentReply, next_step: intent };
+    }
+  }
+
+  // 2. Active flow routing
+  if (sess.flow === "devis") {
+    // Auto-extract entities from free text before processing step
+    if (sess.stage && ["type", "surface", "city", "description"].includes(sess.stage)) {
+      const extracted = extractProjectFromMessage(msg);
+      // Pre-fill missing fields from free-text entity extraction
+      if (!sess.collectedData.type && extracted.type) sess.collectedData.type = extracted.type;
+      if (!sess.collectedData.city && extracted.city) sess.collectedData.city = extracted.city;
+    }
+    const reply = processDevisInput(sess, msg);
+    if (reply === null) {
+      // User chose menu from result step
+      resetSession(sessionId);
+      return { reply: MAIN_MENU, next_step: "menu" };
+    }
+    if (reply) return { reply, next_step: `devis_${sess.stage}` };
+  }
+
+  if (sess.flow === "contact") {
+    const reply = processContactInput(sess, msg, sessionId);
+    if (reply) return { reply, next_step: "contact" };
+  }
+
+  if (sess.flow === "rdv") {
+    const reply = processRdvInput(sess, msg, sessionId);
+    if (reply) return { reply, next_step: "rdv" };
+  }
+
+  if (sess.flow === "service_submenu") {
+    const detail = SERVICES_DETAIL[msg.trim()];
+    if (detail) {
+      sess.flow = "service_detail";
+      sess.stage = "service_detail";
+      return { reply: detail + `\n\nSouhaitez-vous une estimation pour ce type de projet ? (Oui/Non)`, next_step: "service_detail" };
+    }
+    return { reply: `Tapez 1 à 6 ou "menu" pour revenir 😊`, next_step: "service_submenu" };
+  }
+
+  if (sess.flow === "service_detail") {
+    if (/oui|yes|ok|o\b/i.test(msg)) {
+      resetSession(sessionId);
+      return { reply: startDevis(getSession(sessionId)), next_step: "devis" };
+    }
+    resetSession(sessionId);
+    return { reply: MAIN_MENU, next_step: "menu" };
+  }
+
+  // 3. Menu shortcuts
+  const lowerMsg = msg.toLowerCase();
+  if (lowerMsg === "1" || lowerMsg === "1️⃣") {
+    return { reply: startDevis(sess), next_step: "devis" };
+  }
+  if (lowerMsg === "2" || lowerMsg === "2️⃣") {
+    sess.flow = "service_submenu";
+    sess.stage = "service_submenu";
+    return { reply: getServicesSubmenu(), next_step: "service_submenu" };
+  }
+  if (lowerMsg === "3" || lowerMsg === "3️⃣" || lowerMsg.includes("réalisations")) {
+    return { reply: `🔗 *Nos réalisations* : https://www.erpac.ma/projects.cfm\n\nSouhaitez-vous une estimation pour un projet similaire ? (Oui/Non)`, next_step: "projects_redirect" };
+  }
+  if (lowerMsg === "4" || lowerMsg === "4️⃣") {
+    return { reply: startRdv(sess), next_step: "rdv" };
+  }
+
+  // 4. Free-text project detection ("Villa 300m² Casablanca piscine")
+  const extracted = extractProjectFromMessage(msg);
+  if (extracted.surface && (extracted.type || extracted.pool)) {
+    resetSession(sessionId);
+    const newSess = getSession(sessionId);
+    return { reply: startDevis(newSess, extracted), next_step: "devis" };
+  }
+
+  // 5. Greetings → menu
+  if (intent === "greeting" || /^(bonjour|salam|hello|salut|bonsoir)/i.test(msg)) {
+    return { reply: MAIN_MENU, next_step: "menu" };
+  }
+
+  // 6. Smart fallback
+  return { reply: SMART_FALLBACK, next_step: "menu" };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -616,12 +956,22 @@ app.get("/leads", (req, res) => {
   }
 });
 
-app.get("/health", (_, res) => res.json({ status: "ok", version: "erpac-production" }));
+app.get("/sessions", (req, res) => {
+  const summary = Object.entries(sessions).map(([id, s]) => ({
+    id,
+    flow: s.flow,
+    stage: s.stage,
+    lastActivity: new Date(s.lastActivity).toLocaleString("fr-MA", { timeZone: "Africa/Casablanca" }),
+  }));
+  res.json({ count: summary.length, sessions: summary });
+});
+
+app.get("/health", (_, res) => res.json({ status: "ok", version: "erpac-smart-v2" }));
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, async () => {
-  console.log(`🏗️ ERPAC Official Bot (tarifs métier) sur le port ${PORT}`);
+  console.log(`🏗️ ERPAC Smart Bot v2 sur le port ${PORT}`);
   await initGoogleSheets();
-  console.log(`📝 Leads sauvegardés localement dans ${LEADS_FILE}`);
-  console.log(`📊 Voir les leads: /leads`);
+  console.log(`📝 Leads: ${LEADS_FILE}`);
+  console.log(`📊 /leads  |  🔍 /sessions  |  ❤️ /health`);
 });
