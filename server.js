@@ -419,7 +419,7 @@ Souhaitez-vous :
 4️⃣ Spécialités`;
 
 // ========================= FLOWS =========================
-// ----- Devis -----
+// ----- Devis (inchangé, fiable) -----
 function startDevis(sess, prefilled = {}) {
   sess.flow = "devis";
   sess.collectedData = { ...prefilled };
@@ -521,12 +521,11 @@ function processDevisInput(sess, msg, sessionId) {
 
   if (stage === "description") {
     d.description = msg.trim();
-    // Détection piscine depuis description
     if (/\bpiscine\b/i.test(msg) && d.type !== "Piscine clés en main") {
       d.pool = true;
       const ps = extractPoolSurface(msg);
       if (ps) d.poolSurface = ps;
-      else if (!d.poolSurface) d.poolSurface = null; // sera demandé
+      else if (!d.poolSurface) d.poolSurface = null;
     }
     if (/post.?tension/i.test(msg)) d.postTension = true;
     if (d.type === "Étanchéité") {
@@ -567,7 +566,7 @@ function computeAndShowDevis(sess) {
     clotureLength: d.type === "Mur de clôture" ? d.clotureLength : undefined,
   };
   const { sousTotal, marge, total, details } = calculerDevis(projet);
-  sess.collectedData.estimate_total = total;
+  d.estimate_total = total;
   sess.stage = "result";
   let reply = `📊 *Estimation ERPAC*\n\n`;
   details.forEach(d => reply += d + "\n");
@@ -594,7 +593,7 @@ function handleDevisResult(sess, msg, sessionId) {
   return `Répondez 1, 2, 3 ou 4.`;
 }
 
-// ----- Contact -----
+// ----- Contact (simple, OK) -----
 function startContactCollection(sess, origin) {
   sess.flow = "contact";
   sess.stage = "nom";
@@ -642,48 +641,130 @@ function processContactInput(sess, msg, sessionId) {
   return null;
 }
 
-// ----- RDV -----
+// ----- RDV : version CORRIGÉE (sans boucle infinie) -----
 function startRdv(sess) {
   sess.flow = "rdv";
   sess.stage = "rdv_nom";
   sess.collectedData.rdv = {};
+  sess.rdvRetry = {}; // compteur de tentatives par étape
   return `📅 *Prise de rendez-vous*\n\n👤 Votre nom complet ?`;
 }
 
-const RDV_STAGES = [
-  { stage: "rdv_nom", field: "nom", next: "rdv_tel", prompt: "📞 Numéro de téléphone ?" },
-  { stage: "rdv_tel", field: "telephone", next: "rdv_ville", prompt: "📍 Ville du projet ?" },
-  { stage: "rdv_ville", field: "ville", next: "rdv_type", prompt: "🏗️ Type de projet ?" },
-  { stage: "rdv_type", field: "type", next: "rdv_date", prompt: "📅 Date souhaitée ?" },
-  { stage: "rdv_date", field: "date", next: "rdv_heure", prompt: "⏰ Heure souhaitée ?" },
-  { stage: "rdv_heure", field: "heure", next: "rdv_description", prompt: "📝 Décrivez brièvement le besoin." },
-  { stage: "rdv_description", field: "description", next: "done", prompt: null },
-];
-
 function processRdvInput(sess, msg, sessionId) {
-  if (sess.stage === "rdv_done") return null;
-  const current = RDV_STAGES.find(s => s.stage === sess.stage);
-  if (!current) return null;
+  const stage = sess.stage;
   const rdv = sess.collectedData.rdv || {};
-  rdv[current.field] = msg.trim();
   sess.collectedData.rdv = rdv;
-  if (current.next === "done") {
+
+  // Initialiser le compteur de retry pour cette étape
+  if (!sess.rdvRetry) sess.rdvRetry = {};
+  if (!sess.rdvRetry[stage]) sess.rdvRetry[stage] = 0;
+
+  // Vérifier si l'utilisateur veut annuler (déjà géré par les intents globaux, mais sécurité)
+  if (/menu|annuler|stop|devis/i.test(msg)) {
+    // On laisse le processeur principal prendre le relais
+    return null;
+  }
+
+  // Étape 1 : Nom
+  if (stage === "rdv_nom") {
+    if (msg.trim().length < 2) {
+      sess.rdvRetry[stage]++;
+      if (sess.rdvRetry[stage] >= 2) {
+        rdv.nom = "Client anonyme";
+        sess.stage = "rdv_tel";
+        return `Nom non fourni. Je note "Client anonyme". 📞 Numéro de téléphone ?`;
+      }
+      return `Nom complet s'il vous plaît (minimum 2 caractères).`;
+    }
+    rdv.nom = msg.trim();
+    sess.stage = "rdv_tel";
+    sess.rdvRetry[stage] = 0;
+    return `📞 Numéro de téléphone ?`;
+  }
+
+  // Étape 2 : Téléphone
+  if (stage === "rdv_tel") {
+    const cleaned = msg.replace(/[\s\-]/g, "");
+    if (!/[0-9]{8,}/.test(cleaned)) {
+      sess.rdvRetry[stage]++;
+      if (sess.rdvRetry[stage] >= 2) {
+        rdv.telephone = "non fourni";
+        sess.stage = "rdv_ville";
+        return `Téléphone non valide. Je passe à la ville. 📍 Ville du projet ?`;
+      }
+      return `Numéro invalide. Format: 0612345678 ou +212612345678`;
+    }
+    rdv.telephone = msg.trim();
+    sess.stage = "rdv_ville";
+    sess.rdvRetry[stage] = 0;
+    return `📍 Ville du projet ?`;
+  }
+
+  // Étape 3 : Ville
+  if (stage === "rdv_ville") {
+    if (msg.trim().length < 2) {
+      sess.rdvRetry[stage]++;
+      if (sess.rdvRetry[stage] >= 2) {
+        rdv.ville = "non précisée";
+        sess.stage = "rdv_type";
+        return `Ville non précisée. 🏗️ Type de projet ?`;
+      }
+      return `Ville s'il vous plaît.`;
+    }
+    rdv.ville = msg.trim();
+    sess.stage = "rdv_type";
+    sess.rdvRetry[stage] = 0;
+    return `🏗️ Type de projet ? (ex: villa, rénovation, piscine, étanchéité)`;
+  }
+
+  // Étape 4 : Type de projet
+  if (stage === "rdv_type") {
+    if (msg.trim().length < 2) {
+      sess.rdvRetry[stage]++;
+      if (sess.rdvRetry[stage] >= 2) {
+        rdv.type = "non spécifié";
+        sess.stage = "rdv_date";
+        return `Type non précisé. 📅 Date souhaitée ?`;
+      }
+      return `Quel type de projet ?`;
+    }
+    rdv.type = msg.trim();
+    sess.stage = "rdv_date";
+    sess.rdvRetry[stage] = 0;
+    return `📅 Date souhaitée (ex: lundi 15 mai ou "à déterminer") ?`;
+  }
+
+  // Étape 5 : Date
+  if (stage === "rdv_date") {
+    rdv.date = msg.trim();
+    sess.stage = "rdv_heure";
+    return `⏰ Heure souhaitée (ex: 10h, 14h30) ?`;
+  }
+
+  // Étape 6 : Heure
+  if (stage === "rdv_heure") {
+    rdv.heure = msg.trim();
+    sess.stage = "rdv_description";
+    return `📝 Décrivez brièvement votre besoin (quelques mots) :`;
+  }
+
+  // Étape 7 : Description
+  if (stage === "rdv_description") {
+    rdv.description = msg.trim();
+    // Enregistrement du lead
     const client = { nom: rdv.nom, telephone: rdv.telephone, email: "" };
     const project = { type: rdv.type, city: rdv.ville, surface: "" };
     const score = estimateLeadScore(client, project, "RDV");
     notifyLead(client, project, "RDV", score.label);
-    const recap = `✅ *Rendez-vous enregistré !*\n\n👤 ${rdv.nom}\n📞 ${rdv.telephone}\n📍 ${rdv.ville}\n🏗️ ${rdv.type}\n📅 ${rdv.date} à ${rdv.heure}\n📝 ${rdv.description}\n\nUn conseiller vous contactera.`;
-    sess.stage = "rdv_done";
-    sess.flow = null;
+    const recap = `✅ *Rendez-vous enregistré !*\n\n👤 ${rdv.nom}\n📞 ${rdv.telephone}\n📍 ${rdv.ville}\n🏗️ ${rdv.type}\n📅 ${rdv.date} à ${rdv.heure}\n📝 ${rdv.description}\n\nUn conseiller vous contactera pour confirmer.`;
     delete sessions[sessionId];
     return recap;
   }
-  sess.stage = current.next;
-  const nextStage = RDV_STAGES.find(s => s.stage === current.next);
-  return nextStage ? nextStage.prompt : null;
+
+  return null;
 }
 
-// ----- Spécialités -----
+// ----- Spécialités (OK) -----
 function processSpecialites(sess, msg, sessionId) {
   if (sess.stage === "specialites_selection") {
     const key = msg.trim();
@@ -710,17 +791,16 @@ function processSpecialites(sess, msg, sessionId) {
   return null;
 }
 
-// ========================= MAIN PROCESSOR =========================
+// ========================= MAIN PROCESSOR (corrigé) =========================
 function processMessage(sessionId, raw) {
   if (!raw || !raw.trim()) return { reply: MAIN_MENU, next_step: "menu" };
   const msg = raw.trim();
   const sess = getSession(sessionId);
   sess.id = sessionId;
 
-  // 1. Global intent (interrupt anywhere)
+  // 1. Interception des intentions globales
   const intent = detectIntent(msg);
-  if (intent && (intent !== "greeting" || sess.flow)) {
-    // Gestion des intents globaux
+  if (intent && intent !== "greeting") {
     switch (intent) {
       case "menu":
         resetSession(sessionId);
@@ -748,11 +828,11 @@ function processMessage(sessionId, raw) {
         sess.flow = null;
         return { reply: `🔗 *Nos réalisations* : https://www.erpac.ma/projects.cfm\n\nSouhaitez-vous une estimation pour un projet similaire ? (Oui/Non)`, next_step: "projects_redirect" };
       default:
-        // continue normal flow
+        // continuer
     }
   }
 
-  // 2. Gestion des étapes spécifiques
+  // 2. Gestion des étapes spéciales (projects_redirect)
   if (sess.stage === "projects_redirect") {
     if (/oui|yes|ok|o/i.test(msg)) {
       resetSession(sessionId);
@@ -762,6 +842,7 @@ function processMessage(sessionId, raw) {
     return { reply: MAIN_MENU, next_step: "menu" };
   }
 
+  // 3. Routage des flows actifs
   if (sess.flow === "devis") {
     const reply = processDevisInput(sess, msg, sessionId);
     if (reply === null) {
@@ -786,7 +867,7 @@ function processMessage(sessionId, raw) {
     if (reply) return { reply, next_step: "specialites" };
   }
 
-  // 3. Menu principal par numéro
+  // 4. Menu principal par numéro
   const lower = msg.toLowerCase();
   if (lower === "1" || lower === "1️⃣") {
     return { reply: startDevis(sess, {}), next_step: "devis" };
@@ -808,7 +889,7 @@ function processMessage(sessionId, raw) {
     return { reply: SPECIALITES_MENU, next_step: "specialites" };
   }
 
-  // 4. Détection automatique d'un projet par texte libre
+  // 5. Détection automatique d'un projet par texte libre
   const extracted = extractProjectFromMessage(msg);
   if (extracted.surface && (extracted.type || extracted.pool)) {
     resetSession(sessionId);
@@ -816,7 +897,7 @@ function processMessage(sessionId, raw) {
     return { reply: startDevis(newSess, extracted), next_step: "devis" };
   }
 
-  // 5. Fallback intelligent
+  // 6. Fallback intelligent
   return { reply: SMART_FALLBACK, next_step: "menu" };
 }
 
@@ -878,11 +959,11 @@ app.get("/sessions", (req, res) => {
   res.json({ count: summary.length, sessions: summary });
 });
 
-app.get("/health", (_, res) => res.json({ status: "ok", version: "erpac-final-v2" }));
+app.get("/health", (_, res) => res.json({ status: "ok", version: "erpac-rdv-fixed" }));
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, async () => {
-  console.log(`🏗️ ERPAC Smart Bot vFinal sur le port ${PORT}`);
+  console.log(`🏗️ ERPAC Smart Bot (RDV corrigé) sur port ${PORT}`);
   await initGoogleSheets();
   console.log(`📝 Leads: ${LEADS_FILE}`);
   console.log(`📊 /leads | 🔍 /sessions | ❤️ /health`);
