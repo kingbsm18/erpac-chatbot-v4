@@ -409,36 +409,90 @@ const TYPE_DESCRIPTIONS = {
   "6": "💧 Étanchéité terrasses, sous-sols, toitures, piscines. Solutions haute performance, garantie 10 ans. + aménagements extérieurs."
 };
 
-// ---- Prise de rendez-vous (collecte en un seul message) ----
-const RDV_PROMPT = `Très bien
+// ---- RDV : questions une par une (exactement le script) ----
+const RDV_QUESTIONS = [
+  { field: "nom",         prompt: "1️⃣ Nom complet" },
+  { field: "telephone",   prompt: "2️⃣ Numéro de téléphone" },
+  { field: "ville",       prompt: "3️⃣ Ville du projet" },
+  { field: "type",        prompt: "4️⃣ Type de projet" },
+  { field: "date",        prompt: "5️⃣ Date souhaitée" },
+  { field: "heure",       prompt: "6️⃣ Heure souhaitée" },
+  { field: "description", prompt: "7️⃣ Description rapide du besoin" }
+];
+
+function startRdv(sess) {
+  sess.flow = "rdv";
+  sess.rdvStep = 0;
+  sess.rdvData = {};
+  // Message initial avec la liste des 7 informations (sans exemple)
+  return `Très bien
 
 Pour planifier votre rendez-vous avec un conseiller ERPAC, merci de renseigner les informations suivantes :
 
-1️⃣ Nom complet  
-2️⃣ Numéro de téléphone  
-3️⃣ Ville du projet  
-4️⃣ Type de projet  
-5️⃣ Date souhaitée  
-6️⃣ Heure souhaitée  
-7️⃣ Description rapide du besoin
+1️⃣ Nom complet
+2️⃣ Numéro de téléphone
+3️⃣ Ville du projet
+4️⃣ Type de projet
+5️⃣ Date souhaitée
+6️⃣ Heure souhaitée
+7️⃣ Description rapide du besoin`;
+}
 
-Exemple :
-“Mohssine Essarhani, +2126XXXXXXX, Rabat, villa R+1 avec piscine, samedi 15h, demande de devis construction.”`;
+function processRdvInput(sess, msg, sessionId) {
+  if (sess.flow !== "rdv") return null;
+  const step = sess.rdvStep;
+  if (step >= RDV_QUESTIONS.length) {
+    // Fin du questionnaire : enregistrement et récapitulatif
+    const rdv = sess.rdvData;
+    // Validation minimale
+    if (!rdv.nom || !rdv.telephone || !rdv.ville || !rdv.type) {
+      // Si des champs obligatoires manquent, on redemande ? Normalement ils ont été remplis.
+      // Par sécurité, on renvoie à la première question manquante.
+      for (let i = 0; i < RDV_QUESTIONS.length; i++) {
+        const f = RDV_QUESTIONS[i].field;
+        if (!rdv[f]) {
+          sess.rdvStep = i;
+          return RDV_QUESTIONS[i].prompt;
+        }
+      }
+    }
+    const client = { nom: rdv.nom, telephone: rdv.telephone, email: "" };
+    const project = { type: rdv.type, city: rdv.ville, surface: "" };
+    const score = estimateLeadScore(client, project, "RDV");
+    notifyLead(client, project, "RDV", score.label);
+    const recap = `Merci 🙏 Votre demande de rendez-vous a bien été enregistrée.
 
-// Fonction d'extraction des 7 champs à partir d'un message
-function parseRdvMessage(msg) {
-  // On suppose que les champs sont séparés par des virgules
-  const parts = msg.split(',').map(p => p.trim());
-  if (parts.length < 7) return null;
-  return {
-    nom: parts[0] || "",
-    telephone: parts[1] || "",
-    ville: parts[2] || "",
-    type: parts[3] || "",
-    date: parts[4] || "",
-    heure: parts[5] || "",
-    description: parts[6] || ""
-  };
+📌 Récapitulatif :
+👤 Nom : ${rdv.nom}
+📞 Téléphone : ${rdv.telephone}
+📍 Ville : ${rdv.ville}
+🏗️ Projet : ${rdv.type}
+📅 Date souhaitée : ${rdv.date || "non précisée"}
+⏰ Heure : ${rdv.heure || "non précisée"}
+
+Un conseiller ERPAC vous contactera rapidement pour confirmer le rendez-vous.
+
+Souhaitez-vous :
+1️⃣ Retour au menu principal
+2️⃣ Demander une estimation
+3️⃣ Contacter directement un conseiller`;
+    delete sessions[sessionId];
+    return recap;
+  }
+
+  const current = RDV_QUESTIONS[step];
+  const value = msg.trim();
+  if (value.length === 0) {
+    // On peut tolérer les champs optionnels? Tous sont obligatoires pour le script, mais on peut insister
+    return `${current.prompt} ? (ce champ est requis)`;
+  }
+  sess.rdvData[current.field] = value;
+  sess.rdvStep++;
+  if (sess.rdvStep < RDV_QUESTIONS.length) {
+    return RDV_QUESTIONS[sess.rdvStep].prompt;
+  }
+  // Si on vient de finir, appeler récursivement pour générer le récapitulatif
+  return processRdvInput(sess, "", sessionId);
 }
 
 // ========================= FLOWS =========================
@@ -664,32 +718,6 @@ function processContactInput(sess, msg, sessionId) {
   return null;
 }
 
-// ----- RDV : collecte en un seul message -----
-function startRdv(sess) {
-  sess.flow = "rdv";
-  sess.stage = "rdv_waiting";
-  return RDV_PROMPT;
-}
-
-function processRdvInput(sess, msg, sessionId) {
-  if (sess.stage !== "rdv_waiting") return null;
-  const parsed = parseRdvMessage(msg);
-  if (!parsed) {
-    return `Je n'ai pas bien reconnu les informations. Veuillez utiliser le format :\nNom, Téléphone, Ville, Type de projet, Date, Heure, Description\n\nExemple :\n“Mohssine Essarhani, +2126XXXXXXX, Rabat, villa R+1 avec piscine, samedi 15h, demande de devis construction.”`;
-  }
-  // Validation minimale
-  if (!parsed.nom || !parsed.telephone || !parsed.ville || !parsed.type) {
-    return `Les champs Nom, Téléphone, Ville et Type de projet sont obligatoires. Veuillez réessayer.`;
-  }
-  const client = { nom: parsed.nom, telephone: parsed.telephone, email: "" };
-  const project = { type: parsed.type, city: parsed.ville, surface: "" };
-  const score = estimateLeadScore(client, project, "RDV");
-  notifyLead(client, project, "RDV", score.label);
-  const recap = `✅ *Rendez-vous enregistré !*\n\n📌 Récapitulatif :\n👤 Nom : ${parsed.nom}\n📞 Téléphone : ${parsed.telephone}\n📍 Ville : ${parsed.ville}\n🏗️ Projet : ${parsed.type}\n📅 Date souhaitée : ${parsed.date}\n⏰ Heure : ${parsed.heure}\n📝 Description : ${parsed.description}\n\nUn conseiller ERPAC vous contactera rapidement pour confirmer le rendez-vous.\n\nSouhaitez-vous :\n1️⃣ Retour au menu principal\n2️⃣ Demander une estimation\n3️⃣ Contacter directement un conseiller`;
-  delete sessions[sessionId];
-  return recap;
-}
-
 // ----- Services flow avec sous-menu -----
 function startServices(sess) {
   sess.flow = "services";
@@ -728,14 +756,14 @@ function processServicesInput(sess, msg, sessionId) {
     if (/oui|yes|o|y|1|estimation|devis/i.test(msg)) {
       resetSession(sessionId);
       const newSess = getSession(sessionId);
-      // Option : pré-remplir le type de projet dans le devis
+      // Pré-remplir le type
       let type = "";
       switch (sess.tempType) {
         case "1": type = "Construction"; break;
         case "2": type = "Construction"; break;
         case "3": type = "Piscine clés en main"; break;
         case "4": type = "Rénovation"; break;
-        case "5": type = "Construction"; break; // pour commercial, on laisse générique
+        case "5": type = "Construction"; break;
         case "6": type = "Étanchéité"; break;
         default: type = "Construction";
       }
@@ -772,7 +800,6 @@ function processMessage(sessionId, raw) {
         return { reply: startServices(getSession(sessionId)), next_step: "services" };
       case "specialites":
         resetSession(sessionId);
-        // On redirige vers le même service (ou on peut faire un menu dédié, mais pour simplifier on utilise services)
         return { reply: startServices(getSession(sessionId)), next_step: "services" };
       case "conseiller":
         resetSession(sessionId);
@@ -918,11 +945,11 @@ app.get("/sessions", (req, res) => {
   res.json({ count: summary.length, sessions: summary });
 });
 
-app.get("/health", (_, res) => res.json({ status: "ok", version: "erpac-final-v3" }));
+app.get("/health", (_, res) => res.json({ status: "ok", version: "erpac-final-v4" }));
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, async () => {
-  console.log(`🏗️ ERPAC Smart Bot (Services & RDV corrigés) sur port ${PORT}`);
+  console.log(`🏗️ ERPAC Smart Bot (RDV étape par étape) sur port ${PORT}`);
   await initGoogleSheets();
   console.log(`📝 Leads: ${LEADS_FILE}`);
   console.log(`📊 /leads | 🔍 /sessions | ❤️ /health`);
