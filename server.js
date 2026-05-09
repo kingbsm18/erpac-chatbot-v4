@@ -319,7 +319,7 @@ function detectProjectType(text) {
   if (t === "4") return "Étanchéité";
   if (t === "5") return "Piscine clés en main";
   if (t === "6") return "Mur de clôture";
-  if (t === "7") return "Études de projeto";
+  if (t === "7") return "Études de projet";
   return null;
 }
 
@@ -372,51 +372,74 @@ Merci de nous avoir contactés. Nous sommes ERPAC.
 4️⃣ Prendre rendez-vous
 5️⃣ Nos spécialités`;
 
-const SERVICES_PAGE = `🏗️ *SERVICES ERPAC*
+// ---- Services (exactement comme demandé) ----
+const SERVICES_MENU = `Voici quelques types de projets réalisés par ERPAC 👷‍♂️
 
-✅ Études & Conception
-✅ Construction générale (villas, immeubles)
-✅ Gros œuvre
-✅ Lots techniques (plomberie, électricité, finitions)
-✅ Aménagement & décoration
-✅ Étanchéité (garantie 10 ans)
-✅ Piscines clés en main
-✅ Rénovation & réhabilitation
-✅ Mobilier sur mesure
-✅ Menuiserie
-✅ Cloisonnement & faux plafonds
+🏡 Villas modernes R+1 et R+2
+🏢 Immeubles résidentiels
+🏬 Locaux commerciaux et bureaux
+🏊 Piscines clés en main
+🎨 Travaux de finition et rénovation
+💧 Étanchéité terrasses et sous-sols
+🚧 Murs de clôture et aménagements extérieurs
 
-Qualité, délais, accompagnement personnalisé.`;
+ERPAC intervient sur des projets résidentiels, commerciaux et professionnels avec un accompagnement complet de l’étude jusqu’à la réalisation.
 
-const SPECIALITES_MENU = `🔧 *Nos spécialités*
+Souhaitez-vous :
+1️⃣ Voir un type de projet spécifique
+2️⃣ Demander une estimation
+3️⃣ Retour au menu`;
+
+// Sous-menu "voir un type de projet spécifique"
+const SPECIFIC_TYPES_MENU = `🔍 Quel type de projet souhaitez-vous découvrir ?
 
 1️⃣ Villas
 2️⃣ Immeubles
 3️⃣ Piscines
-4️⃣ Rénovation
+4️⃣ Rénovations
 5️⃣ Locaux commerciaux
-6️⃣ Étanchéité
+6️⃣ Étanchéité & aménagements extérieurs`;
 
-Tapez le numéro ou "menu" retour.`;
-
-const SPECIALITES_DETAIL = {
-  "1": `🏡 Villas : construction haut standing, finition premium, piscine, étanchéité, domotique.`,
-  "2": `🏢 Immeubles : R+2 à R+5, béton armé, parties communes, ascenseurs.`,
-  "3": `🏊 Piscines : clés en main, débordement, traditionnelles, intérieures.`,
-  "4": `🔄 Rénovation : complète ou partielle, villas, appartements, locaux.`,
-  "5": `🏬 Locaux commerciaux : bureaux, restaurants, cliniques, boutiques.`,
-  "6": `💧 Étanchéité : terrasses, sous-sols, toitures, piscines, garantie 10 ans.`,
+const TYPE_DESCRIPTIONS = {
+  "1": "🏡 Villas modernes R+1 et R+2 avec finitions haut standing, piscine, étanchéité, domotique. Accompagnement personnalisé.",
+  "2": "🏢 Immeubles résidentiels : structure béton armé, façades modernes, étanchéité terrasses, ascenseurs, parties communes.",
+  "3": "🏊 Piscines clés en main : béton armé, carrelage ou liner, pompe, filtration. Devis personnalisé.",
+  "4": "🔄 Rénovation complète ou partielle : villas, appartements, locaux. Mise aux normes, modernisation.",
+  "5": "🏬 Locaux commerciaux : bureaux, restaurants, cliniques, boutiques. Aménagement clés en main.",
+  "6": "💧 Étanchéité terrasses, sous-sols, toitures, piscines. Solutions haute performance, garantie 10 ans. + aménagements extérieurs."
 };
 
-const SPECIALITES_FOLLOW_UP = `\n\nSouhaitez-vous une estimation ou un rendez-vous ?`;
+// ---- Prise de rendez-vous (collecte en un seul message) ----
+const RDV_PROMPT = `Très bien
 
-const SMART_FALLBACK = `Je n'ai pas bien compris 😊
+Pour planifier votre rendez-vous avec un conseiller ERPAC, merci de renseigner les informations suivantes :
 
-Souhaitez-vous :
-1️⃣ Devis
-2️⃣ Services
-3️⃣ Rendez-vous
-4️⃣ Spécialités`;
+1️⃣ Nom complet  
+2️⃣ Numéro de téléphone  
+3️⃣ Ville du projet  
+4️⃣ Type de projet  
+5️⃣ Date souhaitée  
+6️⃣ Heure souhaitée  
+7️⃣ Description rapide du besoin
+
+Exemple :
+“Mohssine Essarhani, +2126XXXXXXX, Rabat, villa R+1 avec piscine, samedi 15h, demande de devis construction.”`;
+
+// Fonction d'extraction des 7 champs à partir d'un message
+function parseRdvMessage(msg) {
+  // On suppose que les champs sont séparés par des virgules
+  const parts = msg.split(',').map(p => p.trim());
+  if (parts.length < 7) return null;
+  return {
+    nom: parts[0] || "",
+    telephone: parts[1] || "",
+    ville: parts[2] || "",
+    type: parts[3] || "",
+    date: parts[4] || "",
+    heure: parts[5] || "",
+    description: parts[6] || ""
+  };
+}
 
 // ========================= FLOWS =========================
 // ----- Devis (inchangé, fiable) -----
@@ -641,85 +664,82 @@ function processContactInput(sess, msg, sessionId) {
   return null;
 }
 
-// ----- RDV : version CORRIGÉE (avec tableau d'étapes) -----
-const RDV_STEPS = [
-  { field: "nom",         prompt: "👤 Votre nom complet ?",           validate: (v) => v.trim().length >= 2, default: "Client" },
-  { field: "telephone",   prompt: "📞 Numéro de téléphone ?",         validate: (v) => /[0-9]{8,}/.test(v.replace(/[\s\-]/g, "")), default: "non fourni" },
-  { field: "ville",       prompt: "📍 Ville du projet ?",             validate: (v) => v.trim().length >= 2, default: "non précisée" },
-  { field: "type",        prompt: "🏗️ Type de projet ? (ex: villa, rénovation, piscine, étanchéité)", validate: (v) => v.trim().length >= 2, default: "non spécifié" },
-  { field: "date",        prompt: "📅 Date souhaitée (ex: lundi 15 mai ou 'à déterminer') ?", validate: () => true, default: "à déterminer" },
-  { field: "heure",       prompt: "⏰ Heure souhaitée (ex: 10h, 14h30) ?", validate: () => true, default: "à préciser" },
-  { field: "description", prompt: "📝 Décrivez brièvement votre besoin (quelques mots) :", validate: () => true, default: "non renseigné" },
-];
-
+// ----- RDV : collecte en un seul message -----
 function startRdv(sess) {
   sess.flow = "rdv";
-  sess.rdvStep = 0;
-  sess.rdvData = {};
-  sess.rdvRetry = {};
-  return RDV_STEPS[0].prompt;
+  sess.stage = "rdv_waiting";
+  return RDV_PROMPT;
 }
 
 function processRdvInput(sess, msg, sessionId) {
-  if (sess.flow !== "rdv") return null;
-  const step = sess.rdvStep;
-  if (step >= RDV_STEPS.length) {
-    // Finalisation : enregistrement et récapitulatif
-    const rdv = sess.rdvData;
-    const client = { nom: rdv.nom, telephone: rdv.telephone, email: "" };
-    const project = { type: rdv.type, city: rdv.ville, surface: "" };
-    const score = estimateLeadScore(client, project, "RDV");
-    notifyLead(client, project, "RDV", score.label);
-    const recap = `✅ *Rendez-vous enregistré !*\n\n👤 Nom : ${rdv.nom}\n📞 Tél : ${rdv.telephone}\n📍 Ville : ${rdv.ville}\n🏗️ Projet : ${rdv.type}\n📅 Date : ${rdv.date}\n⏰ Heure : ${rdv.heure}\n📝 Besoin : ${rdv.description}\n\nUn conseiller ERPAC vous contactera pour confirmer.\n\nSouhaitez-vous :\n1️⃣ Retour au menu principal\n2️⃣ Demander une estimation\n3️⃣ Contacter directement un conseiller`;
-    delete sessions[sessionId];
-    return recap;
+  if (sess.stage !== "rdv_waiting") return null;
+  const parsed = parseRdvMessage(msg);
+  if (!parsed) {
+    return `Je n'ai pas bien reconnu les informations. Veuillez utiliser le format :\nNom, Téléphone, Ville, Type de projet, Date, Heure, Description\n\nExemple :\n“Mohssine Essarhani, +2126XXXXXXX, Rabat, villa R+1 avec piscine, samedi 15h, demande de devis construction.”`;
   }
-
-  const current = RDV_STEPS[step];
-  let value = msg.trim();
-  const isValid = current.validate(value);
-  if (!isValid) {
-    if (!sess.rdvRetry[step]) sess.rdvRetry[step] = 0;
-    sess.rdvRetry[step]++;
-    if (sess.rdvRetry[step] >= 2) {
-      value = current.default;
-      sess.rdvData[current.field] = value;
-      sess.rdvStep++;
-      if (sess.rdvStep >= RDV_STEPS.length) {
-        return processRdvInput(sess, "", sessionId);
-      }
-      return RDV_STEPS[sess.rdvStep].prompt;
-    }
-    return current.prompt;
+  // Validation minimale
+  if (!parsed.nom || !parsed.telephone || !parsed.ville || !parsed.type) {
+    return `Les champs Nom, Téléphone, Ville et Type de projet sont obligatoires. Veuillez réessayer.`;
   }
-  sess.rdvData[current.field] = value;
-  sess.rdvStep++;
-  if (sess.rdvStep >= RDV_STEPS.length) {
-    return processRdvInput(sess, "", sessionId);
-  }
-  return RDV_STEPS[sess.rdvStep].prompt;
+  const client = { nom: parsed.nom, telephone: parsed.telephone, email: "" };
+  const project = { type: parsed.type, city: parsed.ville, surface: "" };
+  const score = estimateLeadScore(client, project, "RDV");
+  notifyLead(client, project, "RDV", score.label);
+  const recap = `✅ *Rendez-vous enregistré !*\n\n📌 Récapitulatif :\n👤 Nom : ${parsed.nom}\n📞 Téléphone : ${parsed.telephone}\n📍 Ville : ${parsed.ville}\n🏗️ Projet : ${parsed.type}\n📅 Date souhaitée : ${parsed.date}\n⏰ Heure : ${parsed.heure}\n📝 Description : ${parsed.description}\n\nUn conseiller ERPAC vous contactera rapidement pour confirmer le rendez-vous.\n\nSouhaitez-vous :\n1️⃣ Retour au menu principal\n2️⃣ Demander une estimation\n3️⃣ Contacter directement un conseiller`;
+  delete sessions[sessionId];
+  return recap;
 }
 
-// ----- Spécialités (OK) -----
-function processSpecialites(sess, msg, sessionId) {
-  if (sess.stage === "specialites_selection") {
-    const key = msg.trim();
-    if (SPECIALITES_DETAIL[key]) {
-      sess.stage = "specialites_followup";
-      sess.collectedData.lastSpecialite = key;
-      return SPECIALITES_DETAIL[key] + SPECIALITES_FOLLOW_UP;
+// ----- Services flow avec sous-menu -----
+function startServices(sess) {
+  sess.flow = "services";
+  sess.stage = "services_menu";
+  return SERVICES_MENU;
+}
+
+function processServicesInput(sess, msg, sessionId) {
+  const stage = sess.stage;
+  if (stage === "services_menu") {
+    const opt = msg.trim();
+    if (opt === "1") {
+      sess.stage = "specific_type";
+      return SPECIFIC_TYPES_MENU;
     }
-    return `Tapez 1 à 6 ou "menu".`;
-  }
-  if (sess.stage === "specialites_followup") {
-    const opt = msg.toLowerCase();
-    if (/devis|estimation|prix|1/.test(opt)) {
+    if (opt === "2") {
       resetSession(sessionId);
       return startDevis(getSession(sessionId), {});
     }
-    if (/rdv|rendez|visite|2/.test(opt)) {
+    if (opt === "3") {
       resetSession(sessionId);
-      return startRdv(getSession(sessionId));
+      return MAIN_MENU;
+    }
+    return `Option non reconnue. Répondez 1, 2 ou 3.`;
+  }
+  if (stage === "specific_type") {
+    const key = msg.trim();
+    if (TYPE_DESCRIPTIONS[key]) {
+      sess.stage = "after_specific";
+      sess.tempType = key;
+      return `${TYPE_DESCRIPTIONS[key]}\n\nSouhaitez-vous demander une estimation pour ce type de projet ? (Oui/Non)`;
+    }
+    return `Tapez un numéro entre 1 et 6.`;
+  }
+  if (stage === "after_specific") {
+    if (/oui|yes|o|y|1|estimation|devis/i.test(msg)) {
+      resetSession(sessionId);
+      const newSess = getSession(sessionId);
+      // Option : pré-remplir le type de projet dans le devis
+      let type = "";
+      switch (sess.tempType) {
+        case "1": type = "Construction"; break;
+        case "2": type = "Construction"; break;
+        case "3": type = "Piscine clés en main"; break;
+        case "4": type = "Rénovation"; break;
+        case "5": type = "Construction"; break; // pour commercial, on laisse générique
+        case "6": type = "Étanchéité"; break;
+        default: type = "Construction";
+      }
+      return startDevis(newSess, { type: type });
     }
     resetSession(sessionId);
     return MAIN_MENU;
@@ -749,13 +769,11 @@ function processMessage(sessionId, raw) {
         return { reply: startRdv(getSession(sessionId)), next_step: "rdv" };
       case "services":
         resetSession(sessionId);
-        return { reply: SERVICES_PAGE, next_step: "services" };
+        return { reply: startServices(getSession(sessionId)), next_step: "services" };
       case "specialites":
         resetSession(sessionId);
-        const spSess = getSession(sessionId);
-        spSess.flow = "specialites";
-        spSess.stage = "specialites_selection";
-        return { reply: SPECIALITES_MENU, next_step: "specialites" };
+        // On redirige vers le même service (ou on peut faire un menu dédié, mais pour simplifier on utilise services)
+        return { reply: startServices(getSession(sessionId)), next_step: "services" };
       case "conseiller":
         resetSession(sessionId);
         return { reply: startContactCollection(getSession(sessionId), "direct"), next_step: "contact" };
@@ -798,9 +816,9 @@ function processMessage(sessionId, raw) {
     if (reply) return { reply, next_step: "rdv" };
   }
 
-  if (sess.flow === "specialites") {
-    const reply = processSpecialites(sess, msg, sessionId);
-    if (reply) return { reply, next_step: "specialites" };
+  if (sess.flow === "services") {
+    const reply = processServicesInput(sess, msg, sessionId);
+    if (reply) return { reply, next_step: "services" };
   }
 
   // 4. Menu principal par numéro
@@ -809,8 +827,7 @@ function processMessage(sessionId, raw) {
     return { reply: startDevis(sess, {}), next_step: "devis" };
   }
   if (lower === "2" || lower === "2️⃣") {
-    sess.flow = null;
-    return { reply: SERVICES_PAGE, next_step: "services" };
+    return { reply: startServices(sess), next_step: "services" };
   }
   if (lower === "3" || lower === "3️⃣") {
     sess.stage = "projects_redirect";
@@ -820,9 +837,7 @@ function processMessage(sessionId, raw) {
     return { reply: startRdv(sess), next_step: "rdv" };
   }
   if (lower === "5" || lower === "5️⃣") {
-    sess.flow = "specialites";
-    sess.stage = "specialites_selection";
-    return { reply: SPECIALITES_MENU, next_step: "specialites" };
+    return { reply: startServices(sess), next_step: "services" };
   }
 
   // 5. Détection automatique d'un projet par texte libre
@@ -836,6 +851,14 @@ function processMessage(sessionId, raw) {
   // 6. Fallback intelligent
   return { reply: SMART_FALLBACK, next_step: "menu" };
 }
+
+const SMART_FALLBACK = `Je n'ai pas bien compris 😊
+
+Souhaitez-vous :
+1️⃣ Devis
+2️⃣ Services
+3️⃣ Rendez-vous
+4️⃣ Spécialités`;
 
 // ========================= WHATSAPP WEBHOOKS =========================
 async function sendWhatsApp(to, text) {
@@ -895,11 +918,11 @@ app.get("/sessions", (req, res) => {
   res.json({ count: summary.length, sessions: summary });
 });
 
-app.get("/health", (_, res) => res.json({ status: "ok", version: "erpac-final-v2" }));
+app.get("/health", (_, res) => res.json({ status: "ok", version: "erpac-final-v3" }));
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, async () => {
-  console.log(`🏗️ ERPAC Smart Bot (RDV corrigé) sur port ${PORT}`);
+  console.log(`🏗️ ERPAC Smart Bot (Services & RDV corrigés) sur port ${PORT}`);
   await initGoogleSheets();
   console.log(`📝 Leads: ${LEADS_FILE}`);
   console.log(`📊 /leads | 🔍 /sessions | ❤️ /health`);
