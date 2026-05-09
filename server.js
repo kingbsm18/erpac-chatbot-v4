@@ -256,7 +256,7 @@ const INTENT_MAP = [
   { intent: "rdv",        pattern: /\b(rendez-vous|rdv|rendezvous|appointment|visite|rencontre)\b/i },
   { intent: "projets",    pattern: /\b(projets|réalisations|portfolio|references|exemples)\b/i },
   { intent: "conseiller", pattern: /\b(conseiller|agent|commercial|humain|parler à|appel|téléphone|contact)\b/i },
-  { intent: "aide",       pattern: /\b(aide|help|aidez|comment|que puis|options|quoi faire)\b/i },
+  { intent: "specialites",  pattern: /\b(spécialités|specialites|specialité|specialite|nos spécialités)\b/i },
 ];
 
 function detectIntent(text) {
@@ -395,33 +395,130 @@ setInterval(() => {
 // ─────────────────────────────────────────────────────────────────────────────
 //  CONTENT STRINGS
 // ─────────────────────────────────────────────────────────────────────────────
-const MAIN_MENU = `Bonjour ! Je suis l'assistant ERPAC 😊
+const MAIN_MENU = `Bonjour,
+Merci de nous avoir contactés. Nous sommes la société ERPAC. Comment pouvons-nous vous aider ?
 
-Comment puis-je vous aider ?
-
-1️⃣ Demander un devis estimatif
+1️⃣ Demander un devis
 2️⃣ Découvrir nos services
 3️⃣ Voir nos projets réalisés
-4️⃣ Prendre rendez-vous`;
+4️⃣ Prendre rendez-vous
+5️⃣ Nos spécialités`;
 
 const SMART_FALLBACK = `Je n'ai pas bien compris 😊
 
 Souhaitez-vous :
 1️⃣ Demander un devis
 2️⃣ Découvrir nos services
-3️⃣ Prendre rendez-vous`;
+3️⃣ Prendre rendez-vous
+4️⃣ Nos spécialités`;
 
-const SERVICES_DETAIL = {
-  "1": "🏡 *Villas* : Construction R+1/R+2, finition haut standing, piscine, étanchéité, clôture.\n👉 Devis personnalisé sur étude.",
-  "2": "🏢 *Immeubles* : Résidentiel R+2 à R+5, structure béton, finitions modernes, étanchéité terrasses.",
-  "3": "🏊 *Piscines* : Clés en main (3500 DH/m²). Béton armé, carrelage/liner, système de filtration.",
-  "4": "🔄 *Rénovations* : Complète ou partielle (6000 DH/m²). Devis gratuit.",
-  "5": "🏬 *Locaux commerciaux* : Aménagement, cloisons, plomberie, électricité, CVC.",
-  "6": "💧 *Étanchéité* : Terrasse (365 DH/m²), SDB (90 DH), piscine (120 DH), voile (160 DH/m). Garantie 10 ans."
+// ── Option 2: Services page (full catalogue) ──────────────────────────────
+const SERVICES_PAGE = `🏗️ *SERVICES ERPAC*
+
+✅ 📐 Études & Conception :
+Plans, faisabilité, permis de construire, assistance MOE.
+
+✅ 🏗️ Construction Générale :
+Villas, immeubles, plateaux bureaux, cliniques.
+
+✅ 🏗️ Gros Œuvre :
+Structure porteuse, fondations, béton armé, charpente.
+
+✅ 🔧 Lots Techniques (Second Œuvre) :
+Plomberie, électricité, revêtements, finitions.
+
+✅ 🎨 Aménagement & Décoration :
+Design intérieur/extérieur, agencement sur-mesure.
+
+✅ 💧 Étanchéité :
+Toitures, terrasses, sous-sols, piscines – garantie 10 ans.
+
+✅ 🏊 Construction de Piscines :
+Piscines clés en main (débordement, traditionnelles, intérieures).
+
+✅ 🔄 Rénovation & Réhabilitation :
+Rénovation complète ou partielle, mise aux normes.
+
+✅ 🪑 Mobilier sur Mesure :
+Conception et fabrication de meubles personnalisés.
+
+✅ 🪚 Menuiserie :
+Menuiserie bois, aluminium, PVC – portes, fenêtres, agencements.
+
+✅ 🧱 Cloisonnement & Faux Plafonds :
+Cloisons intérieures, doublages, faux plafonds, isolation.
+
+Qualité technique, respect des délais, accompagnement personnalisé.`;
+
+// ── Option 5: Nos spécialités ─────────────────────────────────────────────
+const SPECIALITES_MENU = `🔧 Nos spécialités
+
+1️⃣ Villas
+2️⃣ Immeubles
+3️⃣ Piscines
+4️⃣ Rénovation
+5️⃣ Locaux commerciaux
+6️⃣ Étanchéité
+
+Tapez le numéro ou "menu" pour revenir`;
+
+const SPECIALITES_DETAIL = {
+  "1": `🏡 Villas :
+Construction de villas modernes et haut standing :
+• Gros œuvre
+• Finition premium
+• Piscines
+• Étanchéité
+• Domotique
+• Aménagement extérieur`,
+
+  "2": `🏢 Immeubles :
+Construction résidentielle et professionnelle :
+• R+2 à R+5
+• Béton armé
+• Plateaux bureaux
+• Ascenseurs
+• Étanchéité
+• Parties communes`,
+
+  "3": `🏊 Piscines :
+Piscines clés en main :
+• Débordement
+• Traditionnelles
+• Intérieures
+• Filtration
+• Revêtement premium`,
+
+  "4": `🔄 Rénovation :
+Rénovation complète ou partielle :
+• Villas
+• Appartements
+• Locaux commerciaux
+• Mise aux normes
+• Modernisation`,
+
+  "5": `🏬 Locaux commerciaux :
+Aménagement professionnel :
+• Boutiques
+• Restaurants
+• Plateaux bureaux
+• Cliniques
+• Espaces professionnels`,
+
+  "6": `💧 Étanchéité :
+Solutions professionnelles :
+• Toitures
+• Terrasses
+• Sous-sols
+• Piscines
+• Voiles béton
+• Garantie 10 ans`,
 };
 
+const SPECIALITES_FOLLOW_UP = `\n\nSouhaitez-vous une estimation ou un rendez-vous ?`;
+
 function getServicesSubmenu() {
-  return `🔧 *Nos spécialités*\n\n1️⃣ Villas\n2️⃣ Immeubles\n3️⃣ Piscines\n4️⃣ Rénovation\n5️⃣ Locaux commerciaux\n6️⃣ Étanchéité\n\nTapez le numéro ou "menu" pour revenir.`;
+  return SPECIALITES_MENU;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -728,6 +825,9 @@ const RDV_STAGES = [
 ];
 
 function processRdvInput(sess, msg, sessionId) {
+  // Guard: if flow is already done, don't process further
+  if (sess.stage === "rdv_done") return null;
+
   const currentStageConfig = RDV_STAGES.find(s => s.stage === sess.stage);
   if (!currentStageConfig) return null;
 
@@ -740,8 +840,13 @@ function processRdvInput(sess, msg, sessionId) {
     const project = { type: rdv.type, city: rdv.ville, surface: "" };
     notifyLead(client, project, "RDV");
 
-    const recap = `✅ *Rendez-vous enregistré !*\n\n👤 ${rdv.nom}\n📞 ${rdv.telephone}\n📍 ${rdv.ville}\n🏗️ ${rdv.type}\n📅 ${rdv.date} à ${rdv.heure}\n📝 ${rdv.description}\n\nUn conseiller vous contactera pour confirmer 😊`;
-    delete sessions[sessionId];
+    const recap = `✅ *Rendez-vous enregistré !*\n\n👤 ${rdv.nom}\n📞 ${rdv.telephone}\n📍 ${rdv.ville}\n🏗️ ${rdv.type}\n📅 ${rdv.date} à ${rdv.heure}\n📝 ${rdv.description}\n\nUn conseiller vous contactera pour confirmer 😊\n\nTapez "menu" pour revenir à l'accueil.`;
+
+    // Mark done before deleting — prevents any re-entry
+    sess.stage = "rdv_done";
+    sess.flow = null;
+    // Safe reset: clear rdv data but keep session alive for the "menu" reply
+    sess.collectedData = {};
     return recap;
   }
 
@@ -780,10 +885,14 @@ function handleGlobalIntent(intent, sess, sessionId) {
 
     case "services":
       resetSession(sessionId);
-      const s = getSession(sessionId);
-      s.flow = "service_submenu";
-      s.stage = "service_submenu";
-      return getServicesSubmenu();
+      return SERVICES_PAGE;
+
+    case "specialites":
+      resetSession(sessionId);
+      const sp = getSession(sessionId);
+      sp.flow = "specialites";
+      sp.stage = "specialites_selection";
+      return SPECIALITES_MENU;
 
     case "conseiller":
       resetSession(sessionId);
@@ -851,14 +960,55 @@ function processMessage(sessionId, raw) {
   if (sess.flow === "rdv") {
     const reply = processRdvInput(sess, msg, sessionId);
     if (reply) return { reply, next_step: "rdv" };
+    // rdv_done or null falls through to menu
   }
 
+  // ── Spécialités flow (option 5) ──────────────────────────────────────────
+  if (sess.flow === "specialites") {
+    if (sess.stage === "specialites_selection") {
+      const key = msg.trim();
+      const detail = SPECIALITES_DETAIL[key];
+      if (detail) {
+        sess.stage = "specialites_followup";
+        sess.collectedData.lastSpecialite = key;
+        return { reply: detail + SPECIALITES_FOLLOW_UP, next_step: "specialites_followup" };
+      }
+      return { reply: `Tapez 1 à 6 ou "menu" pour revenir 😊`, next_step: "specialites_selection" };
+    }
+    if (sess.stage === "specialites_followup") {
+      const opt = msg.toLowerCase();
+      if (/devis|estimation|prix/i.test(opt) || opt === "1") {
+        resetSession(sessionId);
+        return { reply: startDevis(getSession(sessionId)), next_step: "devis" };
+      }
+      if (/rdv|rendez|visite/i.test(opt) || opt === "2") {
+        resetSession(sessionId);
+        return { reply: startRdv(getSession(sessionId)), next_step: "rdv" };
+      }
+      if (/oui|yes|ok/i.test(opt)) {
+        resetSession(sessionId);
+        return { reply: startDevis(getSession(sessionId)), next_step: "devis" };
+      }
+      resetSession(sessionId);
+      return { reply: MAIN_MENU, next_step: "menu" };
+    }
+  }
+
+  // ── Services page (option 2) ─────────────────────────────────────────────
+  // No sub-flow needed: services page is a static display, then fallback to menu
+  if (sess.flow === "services_page") {
+    resetSession(sessionId);
+    return { reply: MAIN_MENU, next_step: "menu" };
+  }
+
+  // Legacy: kept for safety during any stale sessions
   if (sess.flow === "service_submenu") {
-    const detail = SERVICES_DETAIL[msg.trim()];
+    const key = msg.trim();
+    const detail = SPECIALITES_DETAIL[key];
     if (detail) {
-      sess.flow = "service_detail";
-      sess.stage = "service_detail";
-      return { reply: detail + `\n\nSouhaitez-vous une estimation pour ce type de projet ? (Oui/Non)`, next_step: "service_detail" };
+      sess.flow = "specialites";
+      sess.stage = "specialites_followup";
+      return { reply: detail + SPECIALITES_FOLLOW_UP, next_step: "specialites_followup" };
     }
     return { reply: `Tapez 1 à 6 ou "menu" pour revenir 😊`, next_step: "service_submenu" };
   }
@@ -878,15 +1028,20 @@ function processMessage(sessionId, raw) {
     return { reply: startDevis(sess), next_step: "devis" };
   }
   if (lowerMsg === "2" || lowerMsg === "2️⃣") {
-    sess.flow = "service_submenu";
-    sess.stage = "service_submenu";
-    return { reply: getServicesSubmenu(), next_step: "service_submenu" };
+    sess.flow = "services_page";
+    sess.stage = "services_page";
+    return { reply: SERVICES_PAGE, next_step: "services_page" };
   }
   if (lowerMsg === "3" || lowerMsg === "3️⃣" || lowerMsg.includes("réalisations")) {
     return { reply: `🔗 *Nos réalisations* : https://www.erpac.ma/projects.cfm\n\nSouhaitez-vous une estimation pour un projet similaire ? (Oui/Non)`, next_step: "projects_redirect" };
   }
   if (lowerMsg === "4" || lowerMsg === "4️⃣") {
     return { reply: startRdv(sess), next_step: "rdv" };
+  }
+  if (lowerMsg === "5" || lowerMsg === "5️⃣" || lowerMsg.includes("spécialités") || lowerMsg.includes("specialites")) {
+    sess.flow = "specialites";
+    sess.stage = "specialites_selection";
+    return { reply: SPECIALITES_MENU, next_step: "specialites" };
   }
 
   // 4. Free-text project detection ("Villa 300m² Casablanca piscine")
@@ -966,7 +1121,7 @@ app.get("/sessions", (req, res) => {
   res.json({ count: summary.length, sessions: summary });
 });
 
-app.get("/health", (_, res) => res.json({ status: "ok", version: "erpac-smart-v2" }));
+app.get("/health", (_, res) => res.json({ status: "ok", version: "erpac-smart-v3" }));
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, async () => {
