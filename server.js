@@ -406,17 +406,14 @@ Merci de nous avoir contactés. Nous sommes la société ERPAC. Comment pouvons-
 
 1️⃣ Demander un devis
 2️⃣ Découvrir nos services
-3️⃣ Voir nos projets réalisés
-4️⃣ Prendre rendez-vous
-5️⃣ Nos spécialités`;
+3️⃣ Nos spécialités`;
 
 const SMART_FALLBACK = `Je n'ai pas bien compris 😊
 
 Souhaitez-vous :
 1️⃣ Demander un devis
 2️⃣ Découvrir nos services
-3️⃣ Prendre rendez-vous
-4️⃣ Nos spécialités`;
+3️⃣ Nos spécialités`;
 
 // ── Option 2: Services page (full catalogue) ──────────────────────────────
 const SERVICES_PAGE = `🏗️ *SERVICES ERPAC*
@@ -1257,13 +1254,7 @@ function processMessage(sessionId, raw) {
     sess.stage = "services_page";
     return { reply: SERVICES_PAGE, next_step: "services_page" };
   }
-  if (lowerMsg === "3" || lowerMsg === "3️⃣" || lowerMsg.includes("réalisations")) {
-    return { reply: `🔗 *Nos réalisations* : https://www.erpac.ma/projects.cfm\n\nSouhaitez-vous une estimation pour un projet similaire ? (Oui/Non)`, next_step: "projects_redirect" };
-  }
-  if (lowerMsg === "4" || lowerMsg === "4️⃣") {
-    return { reply: startRdv(sess), next_step: "rdv" };
-  }
-  if (lowerMsg === "5" || lowerMsg === "5️⃣" || lowerMsg.includes("spécialités") || lowerMsg.includes("specialites")) {
+  if (lowerMsg === "3" || lowerMsg === "3️⃣" || lowerMsg.includes("spécialités") || lowerMsg.includes("specialites")) {
     sess.flow = "specialites";
     sess.stage = "specialites_selection";
     return { reply: SPECIALITES_MENU, next_step: "specialites" };
